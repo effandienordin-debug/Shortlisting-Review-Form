@@ -11,7 +11,24 @@ from datetime import datetime, timedelta, timezone
 DB_URL = st.secrets["DATABASE_URL"]
 engine = create_engine(DB_URL)
 
-# --- 2. Database Schema Self-Healing ---
+# --- 2. Helper Functions (Must be before Database Setup) ---
+def hash_password(password):
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def check_password(password, hashed):
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def get_malaysia_time():
+    my_tz = timezone(timedelta(hours=8))
+    return datetime.now(my_tz).strftime('%Y-%m-%d %H:%M:%S')
+
+def get_radio_index(prev_dict, key):
+    val = prev_dict.get(key)
+    if val == "Yes": return 0
+    if val == "No": return 1
+    return None
+
+# --- 3. Database Schema Self-Healing & Auto-Setup ---
 with engine.begin() as conn:
     # Admins Table
     conn.execute(text("""
@@ -48,7 +65,7 @@ with engine.begin() as conn:
     """))
     conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS photo BYTEA"))
     
-    # Reviews Table (Linked to reviewers table)
+    # Reviews Table
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS reviews (
             id SERIAL PRIMARY KEY,
@@ -63,22 +80,14 @@ with engine.begin() as conn:
     """))
     conn.execute(text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"))
 
-# --- 3. Helper Functions ---
-def hash_password(password):
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-def check_password(password, hashed):
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-
-def get_malaysia_time():
-    my_tz = timezone(timedelta(hours=8))
-    return datetime.now(my_tz).strftime('%Y-%m-%d %H:%M:%S')
-
-def get_radio_index(prev_dict, key):
-    val = prev_dict.get(key)
-    if val == "Yes": return 0
-    if val == "No": return 1
-    return None
+    # 🚀 AUTO-CREATE DEFAULT ADMIN IF NONE EXISTS
+    user_count = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0]
+    if user_count == 0:
+        default_admin_pw = hash_password("Admin123!")
+        conn.execute(text("""
+            INSERT INTO users (username, full_name, email, password_hash, role) 
+            VALUES ('admin', 'Master Admin', 'admin@system.com', :pw, 'Admin')
+        """), {"pw": default_admin_pw})
 
 # --- 4. Popup Dialogs ---
 
@@ -273,13 +282,13 @@ if 'menu_choice' not in st.session_state:
 
 # --- LOGIN ---
 if not st.session_state.authenticated:
-    st.title("🔐 RBS Medical Grant Login")
+    st.title("🔐 RBS Shortlisting Review Form")
     with st.form("login"):
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login"):
             with engine.connect() as conn:
-                # 1. Check if user is an Admin (in 'users' table)
+                # 1. Check if user is an Admin
                 res_admin = conn.execute(text("SELECT password_hash, full_name, profile_pic FROM users WHERE username = :u"), {"u": u}).fetchone()
                 
                 if res_admin and check_password(p, res_admin[0]):
@@ -291,7 +300,7 @@ if not st.session_state.authenticated:
                     st.session_state.menu_choice = "Dashboard"
                     st.rerun()
                 else:
-                    # 2. Check if user is a Reviewer (in 'reviewers' table)
+                    # 2. Check if user is a Reviewer
                     res_rev = conn.execute(text("SELECT password_hash, full_name, profile_pic FROM reviewers WHERE username = :u"), {"u": u}).fetchone()
                     if res_rev and check_password(p, res_rev[0]):
                         st.session_state.authenticated = True
@@ -328,7 +337,6 @@ if 'success_msg' in st.session_state:
 if menu == "Dashboard":
     st.header("📊 Admin Dashboard")
     
-    # Query updated to join the new 'reviewers' table
     dashboard_query = text("""
         SELECT 
             u.full_name AS "Reviewer Name", 
@@ -415,10 +423,7 @@ if menu == "Dashboard":
 
         st.divider()
         st.subheader("📥 Export Reports")
-        
         st.download_button("Download Evaluation Records (CSV)", data=display_df.to_csv(index=False).encode('utf-8'), file_name="RBS_Grant_Report.csv", mime="text/csv")
-        
-        st.info("💡 **Tip for Admins:** To download the Analytics charts, hover your mouse over any chart and click the **Camera Icon (📷)** in the top right corner to instantly save it as an image!")
 
 # --- ADMIN: REVIEWER/USER MGMT ---
 elif menu in ["User Management", "Reviewer Management"]:
@@ -462,15 +467,11 @@ elif menu in ["User Management", "Reviewer Management"]:
                     for line in lines:
                         line = line.strip()
                         if not line: continue
-                        
                         separator = '\t' if '\t' in line else ','
                         parts = [x.strip() for x in line.split(separator)]
-                        
                         if len(parts) >= 2:
-                            un_val = parts[0]
-                            fn_val = parts[1]
+                            un_val, fn_val = parts[0], parts[1]
                             em_val = parts[2] if len(parts) >= 3 else ""
-                            
                             if is_reviewer_menu:
                                 conn.execute(text("INSERT INTO reviewers (username, full_name, email, password_hash) VALUES (:un, :fn, :em, :pw) ON CONFLICT (username) DO NOTHING"),
                                              {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw})
@@ -481,11 +482,8 @@ elif menu in ["User Management", "Reviewer Management"]:
                 st.rerun()
 
     st.divider()
-    # Pull from the correct table
-    if is_reviewer_menu:
-        records = pd.read_sql(text("SELECT * FROM reviewers"), engine)
-    else:
-        records = pd.read_sql(text("SELECT * FROM users WHERE role = 'Admin'"), engine)
+    if is_reviewer_menu: records = pd.read_sql(text("SELECT * FROM reviewers"), engine)
+    else: records = pd.read_sql(text("SELECT * FROM users WHERE role = 'Admin'"), engine)
     
     h1, h2, h3, h4, h5 = st.columns([1, 2, 2, 2, 2])
     h1.write("**Pic**"); h2.write("**Full Name**"); h3.write("**Username**"); h4.write("**Email**"); h5.write("**Action**")
@@ -494,23 +492,17 @@ elif menu in ["User Management", "Reviewer Management"]:
         c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 2, 2])
         if row['profile_pic']: c1.image(bytes(row['profile_pic']), width=40)
         else: c1.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=40)
-        
         c2.write(row['full_name'])
         c3.write(row['username'])
         c4.write(row['email'] if pd.notna(row['email']) else "")
-        
         with c5:
             b1, b2 = st.columns(2)
             if is_reviewer_menu:
-                if b1.button("Edit", key=f"r_{row['id']}"): 
-                    edit_reviewer_dialog(row['id'], row['full_name'], row['username'], row['email'])
-                if b2.button("Delete", key=f"del_r_{row['id']}"):
-                    confirm_delete_reviewer(row['id'], row['full_name'])
+                if b1.button("Edit", key=f"r_{row['id']}"): edit_reviewer_dialog(row['id'], row['full_name'], row['username'], row['email'])
+                if b2.button("Delete", key=f"del_r_{row['id']}"): confirm_delete_reviewer(row['id'], row['full_name'])
             else:
-                if b1.button("Edit", key=f"u_{row['id']}"): 
-                    edit_user_dialog(row['id'], row['full_name'], row['username'], row['email'])
-                if b2.button("Delete", key=f"del_u_{row['id']}"):
-                    confirm_delete_user(row['id'], row['full_name'])
+                if b1.button("Edit", key=f"u_{row['id']}"): edit_user_dialog(row['id'], row['full_name'], row['username'], row['email'])
+                if b2.button("Delete", key=f"del_u_{row['id']}"): confirm_delete_user(row['id'], row['full_name'])
 
 # --- ADMIN: APPLICANT MGMT ---
 elif menu == "Applicant Management":
@@ -542,17 +534,11 @@ elif menu == "Applicant Management":
                     for line in lines:
                         line = line.strip()
                         if not line: continue
-                        
                         separator = '\t' if '\t' in line else ','
-                        
-                        if separator == ',':
-                            parts = [x.strip() for x in line.split(',', 2)]
-                        else:
-                            parts = [x.strip() for x in line.split('\t')]
-                            
+                        if separator == ',': parts = [x.strip() for x in line.split(',', 2)]
+                        else: parts = [x.strip() for x in line.split('\t')]
                         if len(parts) >= 2:
-                            n_val = parts[0]
-                            t_val = parts[1]
+                            n_val, t_val = parts[0], parts[1]
                             l_val = parts[2] if len(parts) >= 3 else ""
                             conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l) ON CONFLICT DO NOTHING"), {"n": n_val, "t": t_val, "l": l_val})
                 st.session_state.success_msg = "Bulk applicants added successfully!"
@@ -560,49 +546,31 @@ elif menu == "Applicant Management":
 
     st.divider()
     apps = pd.read_sql(text("SELECT * FROM applicants"), engine)
-    
     ah1, ah2, ah3, ah4, ah5 = st.columns([1, 2, 3, 2, 2])
     ah1.write("**Pic**"); ah2.write("**Name**"); ah3.write("**Proposal Title**"); ah4.write("**Info Link**"); ah5.write("**Action**")
-    
     for _, row in apps.iterrows():
         ac1, ac2, ac3, ac4, ac5 = st.columns([1, 2, 3, 2, 2])
         if row['photo']: ac1.image(bytes(row['photo']), width=50)
         else: ac1.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=50)
-        
         ac2.write(row['name'])
         ac3.write(row['proposal_title'])
         ac4.write(f"[Link]({row['info_link']})")
-        
         with ac5:
             b1, b2 = st.columns(2)
-            if b1.button("Edit", key=f"a_{row['id']}"): 
-                edit_app_dialog(row['id'], row['name'], row['proposal_title'], row['info_link'])
-            if b2.button("Delete", key=f"del_a_{row['id']}"):
-                confirm_delete_app(row['id'], row['name'])
+            if b1.button("Edit", key=f"a_{row['id']}"): edit_app_dialog(row['id'], row['name'], row['proposal_title'], row['info_link'])
+            if b2.button("Delete", key=f"del_a_{row['id']}"): confirm_delete_app(row['id'], row['name'])
 
-# --- REVIEWER: REVIEW FORM (NEW SUBMISSIONS ONLY) ---
+# --- REVIEWER: REVIEW FORM ---
 elif menu == "Review Form":
-    st.title("Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
-    st.info("""
-    The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. This shortlisting review form is to evaluate applications based on key criteria.
-
-    Reviewers can access the applicants' information and supporting documents via the link below. Please refer to **Excel Sheet 1: Summary** before completing this form. Kindly review all materials thoroughly before making your recommendation.
-    """)
-    st.divider()
-    
+    st.title("Dr Ranjeet Bhagwan Singh Medical Research Grant Review")
     st.subheader(f"👋 Welcome, {st.session_state.full_name}!")
-
     pending_q = text("SELECT * FROM applicants WHERE name NOT IN (SELECT applicant_name FROM reviews WHERE reviewer_username = :u)")
     apps_df = pd.read_sql(pending_q, engine, params={"u": st.session_state.username})
-    
     if apps_df.empty: 
         st.success("All reviews completed!")
         st.stop()
-        
     target_applicant_name = st.selectbox("Select Applicant", apps_df['name'])
-
     app_details = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": target_applicant_name}).iloc[0]
-    
     with st.container(border=True):
         c_img, c_info = st.columns([1, 4])
         with c_img:
@@ -614,43 +582,23 @@ elif menu == "Review Form":
             st.markdown(f"**OneDrive / Supporting Documents:** [Click to View Files]({app_details['info_link']})")
 
     with st.form("rbs_full_form"):
-        st.subheader("Research Quality and Feasibility")
-        q12a = st.radio("a) Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?", ["Yes", "No"], index=None, horizontal=True)
-        q12b = st.radio("b) Does the applicant have relevant expertise and a strong research track record?", ["Yes", "No"], index=None, horizontal=True)
-        q12c = st.radio("c) Have potential risks been identified, and are there plans to address them?", ["Yes", "No"], index=None, horizontal=True)
-        j13 = st.text_area("Justification (if any)")
-
-        st.subheader("Potential Impact")
-        q14a = st.radio("a) Does the research address an important issue in medical science?", ["Yes", "No"], index=None, horizontal=True)
-        q14b = st.radio("b) Does it have the potential to contribute to significant advancements in the medical field?", ["Yes", "No"], index=None, horizontal=True)
-        j15 = st.text_area("Justification (if any) ", key="j15")
-
-        st.subheader("Innovation and Novelty")
-        q16a = st.radio("a) Does the research propose a novel approach or methodology?", ["Yes", "No"], index=None, horizontal=True)
-        j17 = st.text_area("Justification (if any) ", key="j17")
-
-        st.subheader("Value for Money")
-        q18a = st.radio("a) Are the requested funds essential and appropriately allocated based on the importance of the research?", ["Yes", "No"], index=None, horizontal=True)
-        j19 = st.text_area("Justification (if any) ", key="j19")
-
+        st.subheader("Criteria")
+        q12a = st.radio("a) Methods appropriate?", ["Yes", "No"], index=None, horizontal=True)
+        q12b = st.radio("b) Expertise?", ["Yes", "No"], index=None, horizontal=True)
+        q12c = st.radio("c) Risks identified?", ["Yes", "No"], index=None, horizontal=True)
+        j13 = st.text_area("Justification")
         st.divider()
-        q20 = st.radio("Considering the evaluations made, do you recommend this application for further consideration?", ["Yes", "No"], index=None, horizontal=True)
-        j21 = st.text_area("Please provide a justification for your choice.")
-
+        q20 = st.radio("Do you recommend this application?", ["Yes", "No"], index=None, horizontal=True)
+        j21 = st.text_area("Final Justification")
         if st.form_submit_button("Submit Evaluation"):
-            if None in [q12a, q12b, q12c, q14a, q14b, q16a, q18a, q20]:
-                st.warning("Please select Yes/No for all criteria before submitting.")
+            if None in [q12a, q12b, q12c, q20]: st.warning("Fill all required fields.")
             else:
-                resp_json = json.dumps({"12a":q12a, "12b":q12b, "12c":q12c, "13":j13, "14a":q14a, "14b":q14b, "15":j15, "16a":q16a, "17":j17, "18a":q18a, "19":j19})
+                resp_json = json.dumps({"12a":q12a, "12b":q12b, "12c":q12c, "13":j13})
                 current_time = get_malaysia_time()
-                
                 with engine.begin() as conn:
-                    conn.execute(text("""
-                        INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) 
-                        VALUES (:u, :a, :r, :fr, :oj, :t, :t)
-                    """), {"u": st.session_state.username, "a": target_applicant_name, "r": resp_json, "fr": q20, "oj": j21, "t": current_time})
-                
-                st.session_state.success_msg = "Evaluation successfully submitted!"
+                    conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"),
+                                 {"u": st.session_state.username, "a": target_applicant_name, "r": resp_json, "fr": q20, "oj": j21, "t": current_time})
+                st.session_state.success_msg = "Submitted!"
                 st.session_state.menu_choice = "My Submissions"
                 st.rerun()
 
@@ -659,22 +607,15 @@ elif menu == "My Submissions":
     st.header("📋 My Review History")
     query = text("SELECT r.*, a.photo FROM reviews r LEFT JOIN applicants a ON r.applicant_name = a.name WHERE r.reviewer_username = :u ORDER BY r.submitted_at DESC")
     my_revs = pd.read_sql(query, engine, params={"u": st.session_state.username})
-    
     for _, row in my_revs.iterrows():
         with st.container(border=True):
             m1, m2, m3, m4 = st.columns([1, 4, 2, 1])
             with m1:
                 if row['photo']: st.image(bytes(row['photo']), width=70)
                 else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=70)
-            
             with m2:
                 st.write(f"**Applicant:** {row['applicant_name']}")
                 st.caption(f"Submitted: {row['submitted_at']}")
-                if pd.notna(row.get('updated_at')) and row['updated_at'] != row['submitted_at']:
-                    st.caption(f"Last Updated: {row['updated_at']}")
-                    
             m3.write(f"**Rec:** {row['final_recommendation']}")
-            
             with m4:
-                if st.button("✏️ Edit", key=f"h_{row['id']}"):
-                    edit_review_dialog(row)
+                if st.button("✏️ Edit", key=f"h_{row['id']}"): edit_review_dialog(row)
