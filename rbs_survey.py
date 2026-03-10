@@ -53,10 +53,10 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_data is None: prev_data = {}
     
     sections = [
-        ("Section 1 — Research Quality and Feasibility", [("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), ("12b", "Expertise?"), ("12c", "Risks identified?")]),
-        ("Section 2 — Potential Impact", [("14a", "Important issue?"), ("14b", "Advancements?")]),
-        ("Section 3 — Innovation", [("16a", "Novel approach?")]),
-        ("Section 4 — Value", [("18a", "Funds essential?")]),
+        ("Section 1 — Research Quality and Feasibility", [("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), ("12b", "Does the applicant have relevant expertise and a strong research track record?"), ("12c", "Have potential risks been identified, and are there plans to address them?")]),
+        ("Section 2 — Potential Impact", [("14a", "Does the research address an important issue in medical science?"), ("14b", "Does it have the potential to contribute to significant advancements in the medical field?")]),
+        ("Section 3 — Innovation and Novelty", [("16a", "Does the research propose a novel approach or methodology?")]),
+        ("Section 4 — Value for Money", [("18a", "Are the requested funds essential and appropriately allocated based on the importance of the research?")]),
     ]
     
     responses = {}
@@ -71,7 +71,7 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
 
     st.subheader("Section 5 — Final Recommendation")
     fr_val = prev_data.get('final_recommendation')
-    q20 = st.radio("Recommend this application?", ["Yes", "No"], index=0 if fr_val=="Yes" else (1 if fr_val=="No" else None), horizontal=True, disabled=disabled)
+    q20 = st.radio("Considering the evaluations made above, do you recommend this application for further consideration?", ["Yes", "No"], index=0 if fr_val=="Yes" else (1 if fr_val=="No" else None), horizontal=True, disabled=disabled)
     j21 = st.text_area("Final justification", value=prev_data.get('overall_justification', ""), disabled=disabled)
     
     return {"responses": responses, "recommendation": q20, "justification": j21}
@@ -321,15 +321,6 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
-
-
-
-
-
-
-
-
-
 
 
 
