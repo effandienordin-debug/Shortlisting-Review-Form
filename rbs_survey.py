@@ -70,13 +70,14 @@ def get_radio_index(prev_dict, key):
 def edit_user_dialog(user_id, current_fn, current_un, current_em):
     new_fn = st.text_input("Full Name", current_fn)
     new_un = st.text_input("Username", current_un)
-    new_em = st.text_input("Email", current_em)
+    # Email is now optional
+    new_em = st.text_input("Email (Optional)", current_em if pd.notna(current_em) else "")
     new_pw = st.text_input("New Password (Leave blank to keep current)", type="password")
     new_img = st.file_uploader("Update Profile Picture", type=['jpg', 'png'])
     
     if st.button("Save Changes"):
-        if not new_fn.strip() or not new_un.strip() or not new_em.strip():
-            st.warning("Full Name, Username, and Email cannot be blank.")
+        if not new_fn.strip() or not new_un.strip():
+            st.warning("Full Name and Username cannot be blank.")
             return
             
         img_data = new_img.getvalue() if new_img else None
@@ -211,7 +212,7 @@ if 'menu_choice' not in st.session_state:
 
 # --- LOGIN ---
 if not st.session_state.authenticated:
-    st.title("🔐 2026 RBS: Shortlisting Review Form")
+    st.title("🔐 RBS Medical Grant Login")
     with st.form("login"):
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
@@ -353,11 +354,11 @@ elif menu in ["User Management", "Reviewer Management"]:
     with t1:
         with st.expander(f"➕ Create New {role_target}"):
             with st.form(f"add_u_{role_target}"):
-                un, fn, em, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Email"), st.text_input("Password", type="password")
+                un, fn, em, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Email (Optional)"), st.text_input("Password", type="password")
                 pic = st.file_uploader("Profile Picture (Optional)", type=['jpg', 'png'])
                 if st.form_submit_button("Add User"):
-                    if not un.strip() or not fn.strip() or not em.strip() or not pw.strip():
-                        st.warning("Username, Full Name, Email, and Password are required!")
+                    if not un.strip() or not fn.strip() or not pw.strip():
+                        st.warning("Username, Full Name, and Password are required!")
                     else:
                         hashed = hash_password(pw)
                         pic_data = pic.getvalue() if pic else None
@@ -367,7 +368,7 @@ elif menu in ["User Management", "Reviewer Management"]:
                         st.session_state.success_msg = f"{role_target} added successfully!"
                         st.rerun()
     with t2:
-        st.info("Format: username, full name, email (One per line)")
+        st.info("Format: Username, Full Name, Email (Optional) - You can copy and paste directly from Excel!")
         bulk_data = st.text_area("Paste Data")
         if st.button("Process Bulk Add"):
             if not bulk_data.strip():
@@ -377,11 +378,20 @@ elif menu in ["User Management", "Reviewer Management"]:
                 lines = bulk_data.split('\n')
                 with engine.begin() as conn:
                     for line in lines:
-                        if ',' in line:
-                            parts = [x.strip() for x in line.split(',')]
-                            if len(parts) >= 3:
-                                conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role) VALUES (:un, :fn, :em, :pw, :r) ON CONFLICT DO NOTHING"),
-                                             {"un": parts[0], "fn": parts[1], "em": parts[2], "pw": default_pw, "r": role_target})
+                        line = line.strip()
+                        if not line: continue
+                        
+                        # Smart check to handle Excel pastes (Tabs) or Comma pastes
+                        separator = '\t' if '\t' in line else ','
+                        parts = [x.strip() for x in line.split(separator)]
+                        
+                        if len(parts) >= 2:
+                            un_val = parts[0]
+                            fn_val = parts[1]
+                            em_val = parts[2] if len(parts) >= 3 else ""
+                            # Added ON CONFLICT (username) to safely ignore duplicates
+                            conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role) VALUES (:un, :fn, :em, :pw, :r) ON CONFLICT (username) DO NOTHING"),
+                                         {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw, "r": role_target})
                 st.session_state.success_msg = "Bulk addition processed successfully!"
                 st.rerun()
 
@@ -398,7 +408,7 @@ elif menu in ["User Management", "Reviewer Management"]:
         
         c2.write(row['full_name'])
         c3.write(row['username'])
-        c4.write(row['email'])
+        c4.write(row['email'] if pd.notna(row['email']) else "")
         
         with c5:
             b1, b2 = st.columns(2)
@@ -426,7 +436,7 @@ elif menu == "Applicant Management":
                         st.session_state.success_msg = "Applicant added successfully!"
                         st.rerun()
     with t2:
-        st.info("Format: Name, Proposal Title, Link (One per line)")
+        st.info("Format: Name, Proposal Title, Link - You can copy and paste directly from Excel!")
         bulk_apps = st.text_area("Paste Applicants Data")
         if st.button("Process Bulk Applicants"):
             if not bulk_apps.strip():
@@ -435,10 +445,23 @@ elif menu == "Applicant Management":
                 lines = bulk_apps.split('\n')
                 with engine.begin() as conn:
                     for line in lines:
-                        if ',' in line:
-                            parts = [x.strip() for x in line.split(',')]
-                            if len(parts) >= 3:
-                                conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l)"), {"n": parts[0], "t": parts[1], "l": parts[2]})
+                        line = line.strip()
+                        if not line: continue
+                        
+                        # Smart check to handle Excel pastes (Tabs) or Comma pastes
+                        separator = '\t' if '\t' in line else ','
+                        
+                        if separator == ',':
+                            # Split by max 2 commas, just in case the proposal title contains commas
+                            parts = [x.strip() for x in line.split(',', 2)]
+                        else:
+                            parts = [x.strip() for x in line.split('\t')]
+                            
+                        if len(parts) >= 2:
+                            n_val = parts[0]
+                            t_val = parts[1]
+                            l_val = parts[2] if len(parts) >= 3 else ""
+                            conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l)"), {"n": n_val, "t": t_val, "l": l_val})
                 st.session_state.success_msg = "Bulk applicants added successfully!"
                 st.rerun()
 
@@ -562,5 +585,3 @@ elif menu == "My Submissions":
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"):
                     edit_review_dialog(row)
-
-
