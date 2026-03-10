@@ -18,32 +18,16 @@ def get_report_data(_engine):
     return pd.read_sql(text(query), _engine)
 
 def render_reporting(engine):
-    # --- 1. CSS PRINT HACK ---
-    # This hides Streamlit-specific UI elements during printing
+    # 1. ADDED "NO-PRINT" CLASS TO CSS
     st.markdown("""
         <style>
         @media print {
-            /* Hide Sidebar */
-            [data-testid="stSidebar"] {
+            /* Hide the actual Print buttons and Streamlit UI */
+            .stButton, [data-testid="stSidebar"], header, footer, #MainMenu {
                 display: none !important;
             }
-            /* Hide Top Header/Nav */
-            header {
-                visibility: hidden !important;
-            }
-            /* Hide Streamlit Footer/Menu */
-            #MainMenu, footer {
-                visibility: hidden !important;
-            }
-            /* Adjust padding for the main report */
             .main .block-container {
-                padding-top: 1rem !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-            }
-            /* Force charts to stay visible */
-            .element-container {
-                page-break-inside: avoid;
+                padding: 1rem !important;
             }
         }
         </style>
@@ -79,13 +63,14 @@ def render_reporting(engine):
     btn_col1, btn_col2 = st.columns(2)
 
     # This triggers the window.print() command via Javascript
-    if btn_col1.button("🖨️ Generate Professional PDF", use_container_width=True, type="primary"):
+    if st.button("🖨️ Generate Professional PDF", use_container_width=True, type="primary"):
+        # We use window.parent.print() to escape the Streamlit iframe
         st.components.v1.html("""
             <script>
-                window.print();
+                window.parent.print();
             </script>
         """, height=0)
-        st.toast("Print dialog opened! Remember to select 'Save as PDF'.")
+        st.toast("Opening Print Dialog... Select 'Save as PDF'.")
 
     btn_col2.download_button(
         "📊 Download Data (CSV)",
