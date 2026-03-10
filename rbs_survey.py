@@ -48,7 +48,8 @@ with engine.begin() as conn:
         conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), {"pw": hash_password("Admin123!")})
 
 # --- 3. Shared Form Component (Strict Question Set) ---
-    def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
+    
+def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_resp is None: prev_resp = {}
     if prev_data is None: prev_data = {}
     
@@ -362,6 +363,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
