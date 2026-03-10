@@ -3,8 +3,8 @@ import pandas as pd
 import json
 from sqlalchemy import text
 
-# USE CACHE_RESOURCE: This bypasses the 'Pickle' serialization error entirely.
-# It stores the live DataFrame in memory without trying to 'save' it to disk.
+# USE CACHE_RESOURCE: Bypasses the 'Pickle' serialization error.
+# Stores the live DataFrame in memory without trying to 'save' it to disk.
 @st.cache_resource(ttl=60)
 def get_applicants_list(_engine):
     query = "SELECT * FROM applicants"
@@ -51,7 +51,7 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                     
                     st.success("Draft saved successfully!")
                     st.session_state.active_review_app = None
-                    # Clear resource cache to show 'Saved' status
+                    # Clear resource cache to show updated status
                     st.cache_resource.clear()
                     st.rerun()
                     
@@ -87,3 +87,18 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                 st.cache_resource.clear()
                 st.balloons()
                 st.rerun()
+
+# RENAMED to match your main.py import statement
+def render_submissions(engine):
+    st.header("📋 Your Evaluations")
+    my_revs = pd.read_sql(text("SELECT r.*, a.photo FROM reviews r JOIN applicants a ON r.applicant_name = a.name WHERE r.reviewer_username = :u"), engine, params={"u": st.session_state.username})
+    if my_revs.empty:
+        st.info("You haven't saved any reviews yet.")
+    else:
+        for _, row in my_revs.iterrows():
+            with st.container(border=True):
+                s1, s2 = st.columns([1, 5])
+                if row['photo']: s1.image(bytes(row['photo']), use_container_width=True)
+                s2.subheader(row['applicant_name'])
+                s2.write(f"**Recommendation:** {row['final_recommendation']}")
+                s2.info(f"**Justification:** {row['overall_justification']}")
