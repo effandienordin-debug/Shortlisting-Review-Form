@@ -199,7 +199,7 @@ elif menu == "Review Form":
                     with cols[j]:
                         with st.container(border=True):
                             # Passport Photo
-                            if row['photo']: st.image(bytes(row['photo']), width=200)
+                            if row['photo']: st.image(bytes(row['photo']), width=150)
                             else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
                             
                             st.write(f"**{row['name']}**")
@@ -245,6 +245,7 @@ elif menu == "My Submissions":
                 s2.write(f"### {row['applicant_name']}")
                 s2.write(f"**Recommendation:** {row['final_recommendation']}")
                 s2.info(f"**Justification:** {row['overall_justification']}")
+
 
 
 
