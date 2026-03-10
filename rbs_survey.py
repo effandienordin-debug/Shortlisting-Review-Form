@@ -71,25 +71,54 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_data is None: prev_data = {}
     
     sections = [
-        ("Section 1 — Research Quality and Feasibility", [("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), ("12b", "Does the applicant have relevant expertise and a strong research track record?"), ("12c", "Have potential risks been identified, and are there plans to address them?")]),
-        ("Section 2 — Potential Impact", [("14a", "Does the research address an important issue in medical science?"), ("14b", "Does it have the potential to contribute to significant advancements in the medical field?")]),
-        ("Section 3 — Innovation and Novelty", [("16a", "Does the research propose a novel approach or methodology?")]),
-        ("Section 4 — Value for Money", [("18a", "Are the requested funds essential and appropriately allocated based on the importance of the research?")]),
+        ("Section 1 — Research Quality and Feasibility", [
+            ("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), 
+            ("12b", "Does the applicant have relevant expertise and a strong research track record?"), 
+            ("12c", "Have potential risks been identified, and are there plans to address them?")
+        ]),
+        ("Section 2 — Potential Impact", [
+            ("14a", "Does the research address an important issue in medical science?"), 
+            ("14b", "Does it have the potential to contribute to significant advancements in the medical field?")
+        ]),
+        ("Section 3 — Innovation and Novelty", [
+            ("16a", "Does the research propose a novel approach or methodology?")
+        ]),
+        ("Section 4 — Value for Money", [
+            ("18a", "Are the requested funds essential and appropriately allocated based on the importance of the research?")
+        ]),
     ]
     
     responses = {}
     for title, qs in sections:
         st.subheader(title)
         for code, label in qs:
-            responses[code] = st.radio(label, ["Yes", "No"], index=get_radio_index(prev_resp, code), horizontal=True, disabled=disabled, key=f"q{code}")
+            # Setting index=None forces the user to pick an option (Mandatory)
+            current_idx = get_radio_index(prev_resp, code)
+            responses[code] = st.radio(
+                f"{label} *", 
+                ["Yes", "No"], 
+                index=current_idx, 
+                horizontal=True, 
+                disabled=disabled, 
+                key=f"q{code}"
+            )
         
+        # Justification remains optional
         j_key = str(int(code[:2]) + 1) 
         responses[j_key] = st.text_area(f"Justification ({title})", value=prev_resp.get(j_key, ""), disabled=disabled, key=f"j{j_key}")
         st.divider()
 
     st.subheader("Section 5 — Final Recommendation")
     fr_val = prev_data.get('final_recommendation')
-    q20 = st.radio("Considering the evaluations made above, do you recommend this application for further consideration?", ["Yes", "No"], index=0 if fr_val=="Yes" else (1 if fr_val=="No" else None), horizontal=True, disabled=disabled)
+    
+    # Mandatory Final Recommendation
+    q20 = st.radio(
+        "Considering the evaluations made above, do you recommend this application for further consideration? *", 
+        ["Yes", "No"], 
+        index=(0 if fr_val=="Yes" else (1 if fr_val=="No" else None)), 
+        horizontal=True, 
+        disabled=disabled
+    )
     j21 = st.text_area("Final justification", value=prev_data.get('overall_justification', ""), disabled=disabled)
     
     return {"responses": responses, "recommendation": q20, "justification": j21}
@@ -252,19 +281,25 @@ elif menu == "Review Form":
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
             
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
-                with engine.begin() as conn:
-                    if not rev.empty:
-                        conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
-                                     {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
-                    else:
-                        conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
-                                     {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
-                st.session_state.active_review_app = None
-                st.rerun()
-        
-        if st.button("⬅️ Back to Gallery", use_container_width=True):
-            st.session_state.active_review_app = None
-            st.rerun()
+    # VALIDATION: List of all mandatory Yes/No codes
+    mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
+    
+    # Check if any radio button returned None (not selected)
+    is_incomplete = any(res["responses"][c] is None for c in mandatory_codes) or res["recommendation"] is None
+    
+    if is_incomplete:
+        st.error("⚠️ Please answer all mandatory questions marked with an asterisk (*) before saving.")
+    else:
+        with engine.begin() as conn:
+            # ... (Existing database Save/Update code) ...
+            if not rev.empty:
+                conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
+                             {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
+            else:
+                conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
+                             {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
+        st.session_state.active_review_app = None
+        st.rerun()
 
     else:
         # --- APPLICANT GALLERY VIEW ---
@@ -339,4 +374,5 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
