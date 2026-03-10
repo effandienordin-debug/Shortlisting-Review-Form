@@ -53,7 +53,7 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_data is None: prev_data = {}
     
     sections = [
-        ("Section 1 — Research Quality", [("12a", "Methods achievable?"), ("12b", "Expertise?"), ("12c", "Risks identified?")]),
+        ("Section 1 — Research Quality and Feasibility", [("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), ("12b", "Expertise?"), ("12c", "Risks identified?")]),
         ("Section 2 — Potential Impact", [("14a", "Important issue?"), ("14b", "Advancements?")]),
         ("Section 3 — Innovation", [("16a", "Novel approach?")]),
         ("Section 4 — Value", [("18a", "Funds essential?")]),
@@ -321,6 +321,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
