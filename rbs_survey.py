@@ -1,4 +1,4 @@
-import streamlit as stimport streamlit as st
+import streamlit as st
 import pandas as pd
 import bcrypt
 from sqlalchemy import create_engine, text
@@ -188,3 +188,4 @@ elif menu == "My Submissions":
 
 else:
     st.info(f"{menu} is ready for data.")
+
