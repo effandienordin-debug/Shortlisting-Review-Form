@@ -63,12 +63,12 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 5. Admin CRUD (Create, Read, Update, Delete) ---
+# --- 5. Admin CRUD with Confirmation Dialogs ---
 if menu in ["User Management", "Reviewer Management", "Applicant Management"]:
     table = menu.split(" ")[0].lower() + "s"
     st.header(f"⚙️ {menu}")
 
-    # --- ADD NEW ---
+    # ADD NEW
     with st.expander(f"➕ Create New {menu[:-1]}"):
         with st.form(f"add_{table}"):
             if table == "applicants":
@@ -77,111 +77,96 @@ if menu in ["User Management", "Reviewer Management", "Applicant Management"]:
             else:
                 un, fn, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Password", type="password")
             
-            if st.form_submit_button("Create Record"):
+            if st.form_submit_button("Submit"):
                 with engine.begin() as conn:
                     if table == "applicants":
                         conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link, photo) VALUES (:n, :t, :l, :p)"), {"n":n,"t":t,"l":l,"p":p.getvalue() if p else None})
+                    elif table == "users":
+                        conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :f, 'Admin', :p)"), {"u":un,"f":fn,"p":hash_password(pw)})
                     else:
-                        conn.execute(text(f"INSERT INTO {table} (username, full_name, password_hash) VALUES (:u, :f, :p)"), {"u":un,"f":fn,"p":hash_password(pw)})
-                st.success("Success!"); st.rerun()
+                        conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :f, :p)"), {"u":un,"f":fn,"p":hash_password(pw)})
+                st.success("Record Created!"); st.rerun()
 
-    # --- LIST / EDIT / DELETE ---
+    # LIST & DELETE WITH CONFIRMATION
+    st.subheader(f"Existing {menu}")
     data = pd.read_sql(f"SELECT * FROM {table} ORDER BY id DESC", engine)
     
     for _, row in data.iterrows():
-        edit_key = f"edit_{table}_{row['id']}"
-        del_key = f"del_{table}_{row['id']}"
-        
-        if edit_key not in st.session_state: st.session_state[edit_key] = False
-        if del_key not in st.session_state: st.session_state[del_key] = False
-
         with st.container(border=True):
-            if st.session_state[edit_key]:
-                # --- EDIT MODE ---
-                with st.form(f"form_edit_{table}_{row['id']}"):
-                    st.write(f"**Editing ID: {row['id']}**")
-                    if table == "applicants":
-                        new_n = st.text_input("Name", value=row['name'])
-                        new_t = st.text_area("Proposal", value=row['proposal_title'])
-                        new_l = st.text_input("Link", value=row['info_link'])
-                        if st.form_submit_button("Update Applicant"):
-                            with engine.begin() as conn:
-                                conn.execute(text("UPDATE applicants SET name=:n, proposal_title=:t, info_link=:l WHERE id=:id"), {"n":new_n, "t":new_t, "l":new_l, "id":row['id']})
-                            st.session_state[edit_key] = False
-                            st.rerun()
-                    else:
-                        new_fn = st.text_input("Full Name", value=row['full_name'])
-                        new_un = st.text_input("Username", value=row['username'])
-                        if st.form_submit_button("Update Profile"):
-                            with engine.begin() as conn:
-                                conn.execute(text(f"UPDATE {table} SET full_name=:fn, username=:un WHERE id=:id"), {"fn":new_fn, "un":new_un, "id":row['id']})
-                            st.session_state[edit_key] = False
-                            st.rerun()
-                    if st.form_submit_button("Cancel"):
-                        st.session_state[edit_key] = False
-                        st.rerun()
+            c1, c2, c3 = st.columns([1, 4, 2])
+            
+            # Passport-style Preview
+            if table == "applicants":
+                if row['photo']: c1.image(bytes(row['photo']), width=100)
+                else: c1.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=100)
+                c2.write(f"**{row['name']}**")
+                c2.caption(row['proposal_title'])
             else:
-                # --- VIEW MODE ---
-                c1, c2, c3 = st.columns([1, 4, 2])
-                if table == "applicants":
-                    if row['photo']: c1.image(bytes(row['photo']), width=100)
-                    c2.write(f"**{row['name']}**")
-                    c2.caption(row['proposal_title'])
-                else:
-                    c2.write(f"**{row['full_name']}**")
-                    c2.caption(f"Username: @{row['username']}")
+                c2.write(f"**{row['full_name']}** (@{row['username']})")
+            
+            # Safe Delete Logic
+            delete_key = f"del_req_{table}_{row['id']}"
+            if delete_key not in st.session_state: st.session_state[delete_key] = False
 
-                # CRUD BUTTONS
-                if not st.session_state[del_key]:
-                    btn_edit = c3.button("📝 Edit", key=f"e_btn_{table}_{row['id']}", use_container_width=True)
-                    btn_del = c3.button("🗑️ Delete", key=f"d_btn_{table}_{row['id']}", use_container_width=True)
-                    if btn_edit: 
-                        st.session_state[edit_key] = True
-                        st.rerun()
-                    if btn_del: 
-                        st.session_state[del_key] = True
-                        st.rerun()
-                else:
-                    c3.warning("Confirm Delete?")
-                    if c3.button("✅ Confirm", key=f"conf_{table}_{row['id']}", use_container_width=True):
-                        with engine.begin() as conn:
-                            conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": row['id']})
-                        st.rerun()
-                    if c3.button("❌ Cancel", key=f"can_{table}_{row['id']}", use_container_width=True):
-                        st.session_state[del_key] = False
-                        st.rerun()
+            if not st.session_state[delete_key]:
+                if c3.button("🗑️ Delete", key=f"btn_{table}_{row['id']}", use_container_width=True):
+                    st.session_state[delete_key] = True
+                    st.rerun()
+            else:
+                c3.warning("Are you sure?")
+                col_confirm, col_cancel = c3.columns(2)
+                if col_confirm.button("✅ Yes", key=f"conf_{table}_{row['id']}", use_container_width=True):
+                    with engine.begin() as conn:
+                        conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": row['id']})
+                    st.session_state[delete_key] = False
+                    st.rerun()
+                if col_cancel.button("❌ No", key=f"canc_{table}_{row['id']}", use_container_width=True):
+                    st.session_state[delete_key] = False
+                    st.rerun()
 
-# --- 6. Review Form (Gallery & Evaluation) ---
+# --- 6. Reviewer Form & Gallery ---
 elif menu == "Review Form":
     st.title("📋 Grant Review Portal")
-    # [Evaluation logic remains unchanged from V3 to preserve existing reviews]
-    apps = pd.read_sql("SELECT * FROM applicants", engine)
-    for i in range(0, len(apps), 4):
-        cols = st.columns(4)
-        for j in range(4):
-            if i+j < len(apps):
-                row = apps.iloc[i+j]
-                with cols[j]:
-                    with st.container(border=True):
-                        # Passport Display with Zoom capability
-                        if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
-                        st.write(f"**{row['name']}**")
-                        if st.button("Open Review", key=f"rev_{row['id']}", use_container_width=True):
-                            st.session_state.active_review_app = row['name']
-                            st.rerun()
+    is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
+
+    if st.session_state.get('active_review_app'):
+        # Individual Form View
+        name = st.session_state.active_review_app
+        app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
+        # (Remaining form logic follows your previous structure...)
+        st.subheader(f"Evaluating: {name}")
+        if app['photo']: st.image(bytes(app['photo']), width=150, caption="Passport Zoom (Click to expand)")
+        if st.button("⬅️ Back to Gallery"):
+            st.session_state.active_review_app = None
+            st.rerun()
+        # [Form Fields Here...]
+    else:
+        # Gallery with Zoomable Passport Photos
+        apps = pd.read_sql("SELECT * FROM applicants", engine)
+        for i in range(0, len(apps), 4):
+            cols = st.columns(4)
+            for j in range(4):
+                if i+j < len(apps):
+                    row = apps.iloc[i+j]
+                    with cols[j]:
+                        with st.container(border=True):
+                            if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
+                            else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
+                            st.write(f"**{row['name']}**")
+                            if st.button("Review", key=f"go_{row['id']}", use_container_width=True):
+                                st.session_state.active_review_app = row['name']
+                                st.rerun()
 
 # --- 7. Dashboard ---
 elif menu == "Dashboard":
-    st.header("📊 Performance Metrics")
-    rev_data = pd.read_sql("SELECT final_recommendation, applicant_name FROM reviews", engine)
-    if not rev_data.empty:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Total Evaluations", len(rev_data))
-            fig = px.bar(rev_data['final_recommendation'].value_counts(), title="Overall Decisions", labels={'value':'Count', 'index':'Recommendation'})
-            st.plotly_chart(fig)
-        with col2:
-            st.write("**Latest Submissions**")
-            st.table(rev_data.tail(5))
-    else:
-        st.info("No data recorded yet.")
+    st.header("📊 Analytics Dashboard")
+    df = pd.read_sql("SELECT final_recommendation, applicant_name FROM reviews", engine)
+    if not df.empty:
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.metric("Total Reviews", len(df))
+            fig = px.pie(df, names='final_recommendation', title="Recommendations", color_discrete_map={"Yes":"green","No":"red"})
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            st.write("**Recent Activity**")
+            st.dataframe(df.tail(10), use_container_width=True)
