@@ -3,9 +3,15 @@ import pandas as pd
 import json
 from sqlalchemy import text
 
+# 1. We use an underscore before 'engine' to tell Streamlit: 
+# "Don't track changes to this object, just use it as a tool."
 @st.cache_data(ttl=60)
 def get_applicants_list(_engine):
-    return pd.read_sql("SELECT * FROM applicants", _engine)
+    query = "SELECT * FROM applicants"
+    # Wrapping the read_sql in a standard DataFrame constructor 
+    # ensures the return value is a clean, serializable object.
+    df = pd.read_sql(query, _engine)
+    return df
 
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
