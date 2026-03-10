@@ -184,7 +184,18 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
             if e_col3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
 elif menu == "Review Form":
-    st.title("📋 Grant Review Portal")
+    st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ")
+    # --- New Instructions Section ---
+    st.info("""
+    The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
+    This shortlisting review form is to evaluate applications based on key criteria.
+    
+    **Instructions:**
+    Reviewers can access the applicants' information and supporting documents via the 'View Documents' Link provided in the applicant detail. 
+    Please refer to **Sheet 1: Summary** (the OneDrive link is provided in the table assigned to your name) before completing this form. 
+    Kindly review all materials thoroughly before making your recommendation.
+    """)
+    st.divider()
     # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
@@ -297,6 +308,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
