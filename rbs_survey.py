@@ -183,12 +183,13 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
             
             if e_col3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
-
 elif menu == "Review Form":
     st.title("📋 Grant Review Portal")
+    # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
+        # --- INDIVIDUAL REVIEW PAGE ---
         name = st.session_state.active_review_app
         app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
         rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), engine, params={"u": st.session_state.username, "a": name})
@@ -197,31 +198,40 @@ elif menu == "Review Form":
         with st.container(border=True):
             col_img, col_txt = st.columns([1, 4])
             with col_img:
-                if app['photo']: st.image(bytes(app['photo']), width=150, caption="Passport Zoom")
+                if app['photo']: 
+                    st.image(bytes(app['photo']), width=150, caption="Passport Size (Click to Zoom)")
             with col_txt:
                 st.subheader(name)
-                st.write(app['proposal_title'])
-                st.markdown(f"🔗 [Documents]({app['info_link']})")
+                st.write(f"**Proposal:** {app['proposal_title']}")
+                st.markdown(f"🔗 [View Documents]({app['info_link']})")
 
         with st.form("eval_form"):
+            # Uses your strict 4-section question engine
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
-            if not is_locked and st.form_submit_button("💾 Save Draft"):
+            
+            if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
                 with engine.begin() as conn:
                     if not rev.empty:
-                        conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
+                        conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
+                                     {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
                     else:
-                        conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
+                        conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
+                                     {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
                 st.session_state.active_review_app = None
                 st.rerun()
-        if st.button("⬅️ Back"):
+        
+        if st.button("⬅️ Back to Gallery", use_container_width=True):
             st.session_state.active_review_app = None
             st.rerun()
 
     else:
-        # Upgrade 3: Gallery View with Status & Photos
+        # --- APPLICANT GALLERY VIEW ---
         apps = pd.read_sql("SELECT * FROM applicants", engine)
-        rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
-        revs_dict = dict(zip(rev_records['applicant_name'], rev_records['final_recommendation']))
+        # Fetch existing reviews to show Recommendation and Justification on the card
+        rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation, overall_justification FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
+        
+        # Create a lookup dictionary for quick access
+        reviews_lookup = rev_records.set_index('applicant_name').to_dict('index')
         
         st.subheader("Applicant Gallery")
         for i in range(0, len(apps), 4):
@@ -231,27 +241,40 @@ elif menu == "Review Form":
                     row = apps.iloc[i+j]
                     with cols[j]:
                         with st.container(border=True):
-                            # Passport Photo in card
+                            # Passport Photo
                             if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
                             else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
                             
                             st.write(f"**{row['name']}**")
                             
-                            # Status indicator
-                            status = revs_dict.get(row['name'])
-                            if status:
-                                st.success(f"✅ Saved: {status}")
+                            # Show Status, Recommendation, and Last Justification
+                            if row['name'] in reviews_lookup:
+                                rev_data = reviews_lookup[row['name']]
+                                rec = rev_data['final_recommendation']
+                                color = "green" if rec == "Yes" else "red"
+                                
+                                st.markdown(f"**Status:** :inner[✅ Saved]")
+                                st.markdown(f"**Rec:** :{color}[{rec}]")
+                                
+                                # Show snippet of the last justification
+                                justification = rev_data['overall_justification'] or "No text provided."
+                                # Limit text to 80 characters for the card view
+                                st.caption(f"💬 {justification[:80]}{'...' if len(justification) > 80 else ''}")
                             else:
-                                st.warning("⏳ Still Pending")
+                                st.markdown("**Status:** :orange[⏳ Awaiting Review]")
+                                st.caption("No justification saved yet.")
                             
                             if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                 st.session_state.active_review_app = row['name']
                                 st.rerun()
 
-        if not is_locked and len(revs_dict) >= len(apps) > 0:
-            if st.button("🚀 FINAL SUBMIT ALL", type="primary", use_container_width=True):
+        # Final Batch Submission logic
+        if not is_locked and len(reviews_lookup) >= len(apps) > 0:
+            st.divider()
+            if st.button("🚀 FINAL SUBMIT ALL REVIEWS", type="primary", use_container_width=True):
                 with engine.begin() as conn:
                     conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
+                st.balloons()
                 st.rerun()
 
 elif menu == "My Submissions":
@@ -274,3 +297,4 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Justification:** {row['overall_justification']}")
+
