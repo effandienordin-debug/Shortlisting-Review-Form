@@ -5,9 +5,10 @@ from sqlalchemy import text
 
 # Cache analytics to avoid heavy recalculations
 @st.cache_data(ttl=60)
-def get_analytics_data(_engine):
-    return pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", _engine)
-
+def get_analytics_data(_engine): # Add underscore
+    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", _engine)
+    return df.copy() # Return a clean copy
+    
 def render_dashboard(engine):
     st.header("📊 System Analytics")
     df = get_analytics_data(engine)
