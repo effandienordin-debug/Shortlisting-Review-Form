@@ -10,10 +10,7 @@ import tempfile
 import os
 
 # --- 1. Database Configuration ---
-username = "postgres"
-password = "L3v3r@g3"
-encoded_pass = urllib.parse.quote_plus(password)
-DB_URL = f"postgresql://{username}:{encoded_pass}@localhost:5432/rbs_db"
+DB_URL = st.secrets["DATABASE_URL"]
 engine = create_engine(DB_URL)
 
 # --- 2. Database Schema Self-Healing ---
@@ -608,4 +605,5 @@ elif menu == "My Submissions":
             
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"):
+
                     edit_review_dialog(row)
