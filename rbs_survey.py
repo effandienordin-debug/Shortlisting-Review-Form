@@ -8,7 +8,19 @@ from datetime import datetime, timedelta, timezone
 
 # --- 1. Database & Helpers ---
 DB_URL = st.secrets["DATABASE_URL"]
-engine = create_engine(DB_URL)
+
+@st.cache_resource
+def get_engine():
+    # Pooling prevents the "slowness" by keeping connections ready
+    return create_engine(
+        DB_URL, 
+        pool_size=10, 
+        max_overflow=20, 
+        pool_pre_ping=True
+    )
+
+engine = get_engine()
+# -- engine = create_engine(DB_URL) --
 
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -33,19 +45,25 @@ def delete_item(table, item_id):
     st.rerun()
 
 # --- 2. Database Schema (Maintained) ---
-with engine.begin() as conn:
-    conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50))"))
-    conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255))"))
-    conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS reviews (
-            id SERIAL PRIMARY KEY, reviewer_username VARCHAR(255), applicant_name VARCHAR(255), 
-            responses TEXT, final_recommendation VARCHAR(50), overall_justification TEXT, 
-            submitted_at TIMESTAMP, updated_at TIMESTAMP, is_final BOOLEAN DEFAULT FALSE
-        )
-    """))
-    if conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0] == 0:
-        conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), {"pw": hash_password("Admin123!")})
+@st.cache_resource
+def init_db():
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50))"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255))"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id SERIAL PRIMARY KEY, reviewer_username VARCHAR(255), applicant_name VARCHAR(255), 
+                responses TEXT, final_recommendation VARCHAR(50), overall_justification TEXT, 
+                submitted_at TIMESTAMP, updated_at TIMESTAMP, is_final BOOLEAN DEFAULT FALSE
+            )
+        """))
+        # Check for default admin
+        res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0]
+        if res == 0:
+            conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), 
+                         {"pw": hash_password("Admin123!")})
+    return True
 
 # --- 3. Shared Form Component (Strict Question Set) ---
 def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
@@ -321,3 +339,4 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
