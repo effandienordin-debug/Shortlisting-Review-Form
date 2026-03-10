@@ -183,10 +183,11 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
             
             if e_col3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
+                
 elif menu == "Review Form":
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
     # -- st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ") --
-    st.subheader(f"Welcome, {st.session_state.full_name}!")
+    # --st.subheader(f"Welcome, {st.session_state.full_name}!")--
     # --- New Instructions Section ---
     st.info("""
     The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
@@ -198,6 +199,16 @@ elif menu == "Review Form":
     Kindly review all materials thoroughly before making your recommendation.
     """)
     st.divider()
+    # 2. Modern Avatar Welcome Card
+    with st.container(border=True):
+        col_icon, col_greet = st.columns([1, 10])
+        with col_icon:
+            # Using a clean, professional researcher/medical avatar icon
+            st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
+        with col_greet:
+            st.markdown(f"### Welcome back, {st.session_state.full_name}!")
+            st.caption(f"Logged in as: {st.session_state.username} | Role: Grant Reviewer")
+            st.markdown("🔬 *You are authorized to evaluate early-career medical research applications.*")
     # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
@@ -310,6 +321,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
