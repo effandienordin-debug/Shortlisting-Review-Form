@@ -14,6 +14,7 @@ def get_engine():
 
 engine = get_engine()
 
+@st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
@@ -55,23 +56,43 @@ def render_evaluation_fields(prev_resp=None, is_edit=False):
                     ["Yes", "No"], index=get_radio_index(prev_resp, "14a"), horizontal=True, key=f"{prefix}q14a")
     q14b = st.radio("b) Does it have the potential to contribute to significant advancements in the medical field?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "14b"), horizontal=True, key=f"{prefix}q14b")
-    j15 = st.text_area("Justification (if any)", value=prev_resp.get("15", ""), key=f"{prefix}j15", help="Justification for Potential Impact")
+    j15 = st.text_area("Justification (if any)", value=prev_resp.get("15", ""), key=f"{prefix}j15", help="Potential Impact Justification")
 
     st.subheader("Innovation and Novelty")
     q16a = st.radio("a) Does the research propose a novel approach or methodology?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "16a"), horizontal=True, key=f"{prefix}q16a")
-    j17 = st.text_area("Justification (if any)", value=prev_resp.get("17", ""), key=f"{prefix}j17", help="Justification for Innovation")
+    j17 = st.text_area("Justification (if any)", value=prev_resp.get("17", ""), key=f"{prefix}j17", help="Innovation Justification")
 
     st.subheader("Value for Money")
     q18a = st.radio("a) Are the requested funds essential and appropriately allocated based on the importance of the research?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "18a"), horizontal=True, key=f"{prefix}q18a")
-    j19 = st.text_area("Justification (if any)", value=prev_resp.get("19", ""), key=f"{prefix}j19", help="Justification for Value for Money")
+    j19 = st.text_area("Justification (if any)", value=prev_resp.get("19", ""), key=f"{prefix}j19", help="Value for Money Justification")
 
     responses = {"12a": q12a, "12b": q12b, "12c": q12c, "13": j13, "14a": q14a, "14b": q14b, "15": j15, "16a": q16a, "17": j17, "18a": q18a, "19": j19}
     is_complete = all(x is not None for x in [q12a, q12b, q12c, q14a, q14b, q16a, q18a])
     return responses, is_complete
 
-# --- 4. Persistence & Auth ---
+# --- 4. Database Setup (Self-Healing) ---
+with engine.begin() as conn:
+    conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), email VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50), profile_pic BYTEA)"))
+    conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), email VARCHAR(255), password_hash VARCHAR(255), profile_pic BYTEA)"))
+    conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS reviews (
+            id SERIAL PRIMARY KEY, 
+            reviewer_username VARCHAR(255) REFERENCES reviewers(username) ON UPDATE CASCADE ON DELETE SET NULL, 
+            applicant_name VARCHAR(255), 
+            responses TEXT, 
+            final_recommendation VARCHAR(50), 
+            overall_justification TEXT, 
+            submitted_at TIMESTAMP, 
+            updated_at TIMESTAMP
+        )
+    """))
+    if conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0] == 0:
+        conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), {"pw": hash_password("Admin123!")})
+
+# --- 5. Persistence Logic ---
 if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 
 saved_user = cookie_manager.get(cookie="rbs_user")
@@ -80,7 +101,7 @@ if saved_user and not st.session_state.authenticated:
         res = conn.execute(text("SELECT full_name, 'Admin' as r FROM users WHERE username=:u UNION SELECT full_name, 'Reviewer' as r FROM reviewers WHERE username=:u"), {"u": saved_user}).fetchone()
         if res: st.session_state.update({"authenticated": True, "username": saved_user, "full_name": res[0], "role": res[1]})
 
-# --- 5. Dialogs ---
+# --- 6. Dialogs ---
 @st.dialog("Edit Evaluation Form", width="large")
 def edit_review_dialog(edit_data):
     st.info(f"Editing Review for **{edit_data['applicant_name']}**")
@@ -89,7 +110,7 @@ def edit_review_dialog(edit_data):
         resp_data, complete = render_evaluation_fields(prev_resp, is_edit=True)
         st.divider()
         q20 = st.radio("Considering the evaluations made, do you recommend this application for further consideration?", ["Yes", "No"], index=(0 if edit_data['final_recommendation']=="Yes" else 1), horizontal=True)
-        j21 = st.text_area("Please provide a justification for your choice.")
+        j21 = st.text_area("Please provide a justification for your choice above.", value=edit_data.get('overall_justification', ""))
         if st.form_submit_button("Update Evaluation"):
             if complete and q20:
                 with engine.begin() as conn:
@@ -97,7 +118,7 @@ def edit_review_dialog(edit_data):
                                  {"r": json.dumps(resp_data), "fr": q20, "oj": j21, "t": get_malaysia_time(), "id": int(edit_data['id'])})
                 st.session_state.success_msg = "Successfully updated!"; st.rerun()
 
-# --- 6. Main UI ---
+# --- 7. Main UI ---
 st.set_page_config(page_title="RBS Secure Review System", layout="wide")
 
 if not st.session_state.authenticated:
@@ -114,7 +135,6 @@ if not st.session_state.authenticated:
                 else: st.error("Invalid credentials")
     st.stop()
 
-# SIDEBAR
 with st.sidebar:
     st.title(f"Hi, {st.session_state.full_name}")
     nav = ["Dashboard", "User Management", "Reviewer Management", "Applicant Management"] if st.session_state.role == "Admin" else ["Review Form", "My Submissions"]
@@ -125,8 +145,42 @@ with st.sidebar:
 if 'success_msg' in st.session_state:
     st.success(st.session_state.success_msg); del st.session_state.success_msg
 
-# PAGES
-if menu == "Review Form":
+# --- PAGE LOGIC ---
+if menu == "Dashboard":
+    st.header("📊 Admin Dashboard")
+    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, submitted_at FROM reviews", engine)
+    if not df.empty:
+        c1, c2 = st.columns(2)
+        c1.metric("Total Reviews", len(df))
+        fig = px.pie(df, names='final_recommendation', title="Overall Recommendation Split", color_discrete_map={"Yes":"#28a745", "No":"#dc3545"})
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df, use_container_width=True)
+
+elif menu == "Reviewer Management":
+    st.header("👤 Reviewer Management")
+    with st.expander("Add New Reviewer"):
+        with st.form("add_rev"):
+            un, fn, em, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Email"), st.text_input("Password", type="password")
+            if st.form_submit_button("Add"):
+                with engine.begin() as conn:
+                    conn.execute(text("INSERT INTO reviewers (username, full_name, email, password_hash) VALUES (:u, :f, :e, :p)"), {"u":un, "f":fn, "e":em, "p":hash_password(pw)})
+                st.rerun()
+    revs = pd.read_sql("SELECT id, username, full_name, email FROM reviewers", engine)
+    st.dataframe(revs, use_container_width=True)
+
+elif menu == "Applicant Management":
+    st.header("📝 Applicant Management")
+    with st.expander("Add New Applicant"):
+        with st.form("add_app"):
+            an, at, al = st.text_input("Name"), st.text_area("Proposal Title"), st.text_input("OneDrive Link")
+            if st.form_submit_button("Add"):
+                with engine.begin() as conn:
+                    conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l)"), {"n":an, "t":at, "l":al})
+                st.rerun()
+    apps = pd.read_sql("SELECT id, name, proposal_title FROM applicants", engine)
+    st.dataframe(apps, use_container_width=True)
+
+elif menu == "Review Form":
     st.title("Dr Ranjeet Bhagwan Singh Medical Research Grant Review")
     st.subheader(f"👋 Welcome, {st.session_state.full_name}!")
     
@@ -186,6 +240,6 @@ elif menu == "My Submissions":
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"): edit_review_dialog(row)
 
-# Keep other admin modules as they were...
+# SECTION PLACEHOLDER FOR OTHER MODULES
 else:
-    st.info("Module active and ready.")
+    st.info(f"Module {menu} is online.")
