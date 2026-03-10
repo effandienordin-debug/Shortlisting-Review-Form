@@ -3,14 +3,13 @@ import pandas as pd
 import json
 from sqlalchemy import text
 
-# 1. FIXED CACHE: We convert to a dict and back to a DF to force serialization.
-@st.cache_data(ttl=60)
+# USE CACHE_RESOURCE: This bypasses the 'Pickle' serialization error entirely.
+# It stores the live DataFrame in memory without trying to 'save' it to disk.
+@st.cache_resource(ttl=60)
 def get_applicants_list(_engine):
     query = "SELECT * FROM applicants"
     df = pd.read_sql(query, _engine)
-    # Convert to a list of dicts then back to DF to strip all hidden DB objects
-    pure_data = df.to_dict(orient='records')
-    return pd.DataFrame(pure_data)
+    return df
 
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
@@ -22,7 +21,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
         c2.markdown(f"### Welcome back, {st.session_state.full_name}!")
         c2.caption(f"🔬 Logged in as: {st.session_state.username}")
 
-    # Check lock status
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
@@ -36,14 +34,12 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
             
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
-                # VALIDATION: Prevent blank submission logic
+                # VALIDATION: Check for blank radio selections
                 mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
-                
-                # Check if any radio buttons are unselected or Recommendation is empty
                 is_incomplete = any(res["responses"].get(c) is None for c in mandatory_codes) or res["recommendation"] is None
                 
                 if is_incomplete:
-                    st.error("⚠️ Please answer all mandatory questions marked with an asterisk (*) before saving.")
+                    st.error("⚠️ Please answer all mandatory questions marked with * before saving.")
                 else:
                     with engine.begin() as conn:
                         if not rev.empty:
@@ -55,6 +51,8 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                     
                     st.success("Draft saved successfully!")
                     st.session_state.active_review_app = None
+                    # Clear resource cache to show 'Saved' status
+                    st.cache_resource.clear()
                     st.rerun()
                     
         if st.button("⬅️ Back to Gallery"):
@@ -67,7 +65,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
         reviews_lookup = rev_records.set_index('applicant_name').to_dict('index')
         
         st.subheader("Applicant Gallery")
-        # Grid Display
         for i in range(0, len(apps), 4):
             cols = st.columns(4)
             for j in range(4):
@@ -75,8 +72,7 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                     row = apps.iloc[i+j]
                     with cols[j]:
                         with st.container(border=True):
-                            if row['photo']: 
-                                st.image(bytes(row['photo']), use_container_width=True)
+                            if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
                             st.write(f"**{row['name']}**")
                             if row['name'] in reviews_lookup:
                                 st.success(f"✅ Saved")
@@ -88,16 +84,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             if st.button("🚀 FINAL SUBMIT ALL", type="primary", use_container_width=True):
                 with engine.begin() as conn:
                     conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
+                st.cache_resource.clear()
                 st.balloons()
                 st.rerun()
-
-def render_submissions(engine):
-    st.header("📋 Your Evaluations")
-    my_revs = pd.read_sql(text("SELECT r.*, a.photo FROM reviews r JOIN applicants a ON r.applicant_name = a.name WHERE r.reviewer_username = :u"), engine, params={"u": st.session_state.username})
-    for _, row in my_revs.iterrows():
-        with st.container(border=True):
-            s1, s2 = st.columns([1, 5])
-            if row['photo']: s1.image(bytes(row['photo']), use_container_width=True)
-            s2.subheader(row['applicant_name'])
-            s2.write(f"**Recommendation:** {row['final_recommendation']}")
-            s2.info(f"**Justification:** {row['overall_justification']}")
