@@ -11,23 +11,26 @@ DB_URL = st.secrets["DATABASE_URL"]
 engine = create_engine(DB_URL)
 
 def hash_password(password):
-return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def check_password(password, hashed):
-try: return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-except: return False
+try: 
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+except: 
+    return False
 
 def get_malaysia_time():
-my_tz = timezone(timedelta(hours=8))
-return datetime.now(my_tz).strftime('%Y-%m-%d %H:%M:%S')
+    my_tz = timezone(timedelta(hours=8))
+    return datetime.now(my_tz).strftime('%Y-%m-%d %H:%M:%S')
 
 def get_radio_index(prev_dict, key):
-if not prev_dict: return None
-val = prev_dict.get(key)
-return 0 if val == "Yes" else (1 if val == "No" else None)
+    if not prev_dict: 
+        return None
+    val = prev_dict.get(key)
+    return 0 if val == "Yes" else (1 if val == "No" else None)
 
 def delete_item(table, item_id):
-with engine.begin() as conn:
+    with engine.begin() as conn:
     conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": item_id})
 st.toast(f"Item deleted from {table}")
 st.rerun()
@@ -378,6 +381,7 @@ else:
             sub2.write(f"### {row['applicant_name']}")
             sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
             sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
