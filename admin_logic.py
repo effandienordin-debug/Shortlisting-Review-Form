@@ -3,14 +3,11 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
 
-# 1. FIXED CACHE: Using the dictionary-conversion hack to prevent serialization errors
-@st.cache_data(ttl=60)
+@st.cache_resource(ttl=60)
 def get_analytics_data(_engine):
     df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", _engine)
-    # Convert to a list of dicts then back to DF to strip hidden SQLAlchemy metadata
-    pure_data = df.to_dict(orient='records')
-    return pd.DataFrame(pure_data)
-    
+    return df
+
 def render_dashboard(engine):
     st.header("📊 System Analytics")
     df = get_analytics_data(engine)
@@ -54,14 +51,14 @@ def render_management(menu_title, engine, hash_password, delete_item):
                 pw = st.text_input("Password *", type="password")
             
             if st.form_submit_button("Save"):
-                # VALIDATION: Prevent blank submissions
+                # VALIDATION: Prevent blank entry
                 if table == "applicants":
                     if not n.strip() or not t.strip():
-                        st.error("⚠️ Name and Title cannot be blank.")
+                        st.error("⚠️ Fields cannot be blank.")
                         st.stop()
                 else:
                     if not un.strip() or not fn.strip() or not pw.strip():
-                        st.error("⚠️ Username, Full Name, and Password cannot be blank.")
+                        st.error("⚠️ All fields are mandatory.")
                         st.stop()
 
                 with engine.begin() as conn:
@@ -70,16 +67,14 @@ def render_management(menu_title, engine, hash_password, delete_item):
                     else:
                         conn.execute(text(f"INSERT INTO {table} (username, full_name, password_hash) VALUES (:u, :fn, :p)"), {"u":un, "fn":fn, "p":hash_password(pw)})
                 
-                st.cache_data.clear() # Clear cache to update Dashboard
+                st.cache_resource.clear()
                 st.rerun()
 
-    # Data Display & Edit Logic
     data = pd.read_sql(f"SELECT * FROM {table}", engine)
     for _, row in data.iterrows():
         with st.container(border=True):
             e1, e2, e3 = st.columns([1, 4, 2])
-            if table == "applicants" and row['photo']: 
-                e1.image(bytes(row['photo']), width=100)
+            if table == "applicants" and row['photo']: e1.image(bytes(row['photo']), width=100)
             e2.write(f"**Name:** {row['name'] if table=='applicants' else row['username']}")
             
             with e3.expander("📝 Edit Details"):
@@ -90,30 +85,29 @@ def render_management(menu_title, engine, hash_password, delete_item):
                         new_l = st.text_input("Link", value=row['info_link'])
                         new_p = st.file_uploader("Update Photo", type=['png', 'jpg'])
                         if st.form_submit_button("Update"):
-                            # VALIDATION: Prevent blank updates
                             if not new_n.strip() or not new_t.strip():
-                                st.error("⚠️ Fields cannot be blank.")
+                                st.error("⚠️ Cannot save blank fields.")
                             else:
-                                p_data = new_p.getvalue() if new_p else row['photo']
+                                p_val = new_p.getvalue() if new_p else row['photo']
                                 with engine.begin() as conn:
-                                    conn.execute(text("UPDATE applicants SET name=:n, proposal_title=:t, info_link=:l, photo=:p WHERE id=:id"), {"n":new_n,"t":new_t,"l":new_l,"p":p_data, "id":row['id']})
-                                st.cache_data.clear()
+                                    conn.execute(text("UPDATE applicants SET name=:n, proposal_title=:t, info_link=:l, photo=:p WHERE id=:id"), {"n":new_n,"t":new_t,"l":new_l,"p":p_val, "id":row['id']})
+                                st.cache_resource.clear()
                                 st.rerun()
                     else:
                         new_fn = st.text_input("Full Name", value=row['full_name'])
                         new_pw = st.text_input("New Password (Optional)", type="password")
                         if st.form_submit_button("Update"):
                             if not new_fn.strip():
-                                st.error("⚠️ Full Name cannot be blank.")
+                                st.error("⚠️ Full Name is required.")
                             else:
                                 with engine.begin() as conn:
                                     if new_pw:
                                         conn.execute(text(f"UPDATE {table} SET full_name=:fn, password_hash=:p WHERE id=:id"), {"fn":new_fn, "p":hash_password(new_pw), "id":row['id']})
                                     else:
                                         conn.execute(text(f"UPDATE {table} SET full_name=:fn WHERE id=:id"), {"fn":new_fn, "id":row['id']})
-                                st.cache_data.clear()
+                                st.cache_resource.clear()
                                 st.rerun()
             
             if e3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
-                st.cache_data.clear() # Ensure dashboard reflects deletion
+                st.cache_resource.clear()
