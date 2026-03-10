@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import text # Fixes NameError
+from sqlalchemy import text
 from database_utils import engine, init_db, check_password, hash_password, get_malaysia_time, delete_item
 from form_components import render_evaluation_fields
 from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form, render_submissions
+# --- NEW IMPORT ---
+from reporting_logic import render_reporting 
 
 init_db()
 st.set_page_config(page_title="RBS Grant System", layout="wide")
@@ -26,7 +28,8 @@ if not st.session_state.authenticated:
 
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
-    opts = ["Dashboard", "User Management", "Reviewer Management", "Applicant Management"] if st.session_state.role == "Admin" else ["Review Form", "My Submissions"]
+    # ADDED "Reporting" to opts
+    opts = ["Dashboard", "Reporting", "User Management", "Reviewer Management", "Applicant Management"] if st.session_state.role == "Admin" else ["Review Form", "My Submissions"]
     menu = st.radio("Navigation", opts)
     if st.button("Logout", use_container_width=True):
         st.session_state.clear(); st.rerun()
@@ -34,11 +37,11 @@ with st.sidebar:
 # --- MODULE ROUTING ---
 if menu == "Dashboard":
     render_dashboard(engine)
+elif menu == "Reporting": # --- NEW ROUTE ---
+    render_reporting(engine)
 elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
     render_management(menu, engine, hash_password, delete_item)
 elif menu == "Review Form":
     render_review_form(engine, get_malaysia_time, render_evaluation_fields)
 elif menu == "My Submissions":
     render_submissions(engine)
-
-
