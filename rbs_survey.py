@@ -184,7 +184,8 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
             if e_col3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
 elif menu == "Review Form":
-    st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ")
+    st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
+    # -- st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ") --
     # --- New Instructions Section ---
     st.info("""
     The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
@@ -308,6 +309,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
