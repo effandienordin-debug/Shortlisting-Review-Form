@@ -1,6 +1,9 @@
 import streamlit as st
+import pandas as pd # Standard practice
+from sqlalchemy import text # <--- THIS FIXES YOUR NAMEERROR
 from database_utils import engine, init_db, check_password, hash_password, get_malaysia_time, delete_item
 from form_components import render_evaluation_fields
+
 # Modular Imports
 from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form, render_submissions
@@ -39,3 +42,4 @@ elif menu == "Review Form":
     render_review_form(engine, get_malaysia_time, render_evaluation_fields)
 elif menu == "My Submissions":
     render_submissions(engine)
+
