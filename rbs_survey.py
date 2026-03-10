@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 import bcrypt
+import json
 from sqlalchemy import create_engine, text
 import plotly.express as px
-import json
 from datetime import datetime, timedelta, timezone
 
 # --- 1. Database & Helpers ---
@@ -26,23 +26,28 @@ def get_radio_index(prev_dict, key):
     val = prev_dict.get(key)
     return 0 if val == "Yes" else (1 if val == "No" else None)
 
-# --- 2. Admin CRUD Helper ---
 def delete_item(table, item_id):
     with engine.begin() as conn:
         conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": item_id})
     st.toast(f"Item deleted from {table}")
     st.rerun()
 
-# --- 3. Database Schema ---
+# --- 2. Database Schema (Maintained) ---
 with engine.begin() as conn:
     conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50))"))
     conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255))"))
     conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
-    # Ensure admin exists
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS reviews (
+            id SERIAL PRIMARY KEY, reviewer_username VARCHAR(255), applicant_name VARCHAR(255), 
+            responses TEXT, final_recommendation VARCHAR(50), overall_justification TEXT, 
+            submitted_at TIMESTAMP, updated_at TIMESTAMP, is_final BOOLEAN DEFAULT FALSE
+        )
+    """))
     if conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0] == 0:
         conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), {"pw": hash_password("Admin123!")})
 
-# --- 4. Shared Form Component ---
+# --- 3. Shared Form Component (Strict Question Set) ---
 def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_resp is None: prev_resp = {}
     if prev_data is None: prev_data = {}
@@ -60,7 +65,6 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
         for code, label in qs:
             responses[code] = st.radio(label, ["Yes", "No"], index=get_radio_index(prev_resp, code), horizontal=True, disabled=disabled, key=f"q{code}")
         
-        # Mapping justifications to original keys (13, 15, 17, 19)
         j_key = str(int(code[:2]) + 1) 
         responses[j_key] = st.text_area(f"Justification ({title})", value=prev_resp.get(j_key, ""), disabled=disabled, key=f"j{j_key}")
         st.divider()
@@ -72,7 +76,7 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
     
     return {"responses": responses, "recommendation": q20, "justification": j21}
 
-# --- 5. App Setup ---
+# --- 4. App Setup & Auth ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 
@@ -89,7 +93,7 @@ if not st.session_state.authenticated:
                 else: st.error("Invalid credentials")
     st.stop()
 
-# --- 6. Sidebar ---
+# --- 5. Sidebar ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
     st.write(f"Role: {st.session_state.role}")
@@ -99,7 +103,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 7. Modules ---
+# --- 6. Modules ---
 if menu == "Dashboard":
     st.header("📊 System Analytics")
     df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", engine)
@@ -111,18 +115,23 @@ if menu == "Dashboard":
         met3.metric("Approval Rate", f"{(len(df[df['final_recommendation']=='Yes'])/len(df)*100):.1f}%")
         
         st.divider()
-        col_a, col_b = st.columns(2)
-        with col_a:
-            fig1 = px.pie(df, names='final_recommendation', title="Recommendation Split", color_discrete_map={"Yes":"#2ecc71","No":"#e74c3c"})
+        c_a, c_b = st.columns(2)
+        with c_a:
+            fig1 = px.pie(df, names='final_recommendation', title="Overall Recommendation Split", color_discrete_map={"Yes":"#2ecc71","No":"#e74c3c"})
             st.plotly_chart(fig1)
-        with col_b:
-            fig2 = px.histogram(df, x='reviewer_username', color='final_recommendation', barmode='group', title="Reviews per Reviewer")
+        with c_b:
+            # Upgrade 1: Applicant Analysis
+            app_stats = df.groupby(['applicant_name', 'final_recommendation']).size().reset_index(name='count')
+            fig2 = px.bar(app_stats, x='applicant_name', y='count', color='final_recommendation', title="Applicant Analysis", barmode='group')
             st.plotly_chart(fig2)
+        
+        st.subheader("📋 Master Reviewer Results Table")
+        st.dataframe(df, use_container_width=True)
     else: st.info("No data yet.")
 
 elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
     table = menu.split(" ")[0].lower() + "s"
-    st.header(f"⚙️ {menu} (CRUD)")
+    st.header(f"⚙️ {menu}")
     
     # Create Section
     with st.expander(f"➕ Add New {menu[:-1]}"):
@@ -132,29 +141,47 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
                 p = st.file_uploader("Photo", type=['png', 'jpg'])
             else:
                 un, fn, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Password", type="password")
-            
             if st.form_submit_button("Save"):
                 with engine.begin() as conn:
                     if table == "applicants":
                         conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link, photo) VALUES (:n, :t, :l, :p)"), {"n":n,"t":t,"l":l,"p":p.getvalue() if p else None})
-                    elif table == "users":
-                        conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :f, 'Admin', :p)"), {"u":un,"f":fn,"p":hash_password(pw)})
                     else:
-                        conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :f, :p)"), {"u":un,"f":fn,"p":hash_password(pw)})
+                        conn.execute(text(f"INSERT INTO {table} (username, full_name, role, password_hash) VALUES (:u, :fn, 'Admin', :p)") if table == 'users' else text(f"INSERT INTO {table} (username, full_name, password_hash) VALUES (:u, :fn, :p)"), {"u":un, "fn":fn, "p":hash_password(pw)})
                 st.rerun()
 
-    # List/Update/Delete Section
+    # Upgrade 2: Edit Logic for all modules
     data = pd.read_sql(f"SELECT * FROM {table}", engine)
     for _, row in data.iterrows():
         with st.container(border=True):
-            c1, c2, c3 = st.columns([1, 4, 1.5])
-            if table == "applicants" and row['photo']:
-                c1.image(bytes(row['photo']), width=100) # Passport style display
+            e_col1, e_col2, e_col3 = st.columns([1, 4, 2])
+            if table == "applicants" and row['photo']: e_col1.image(bytes(row['photo']), width=100)
+            e_col2.write(f"**ID:** {row['id']} | **Name:** {row['name'] if table=='applicants' else row['username']}")
             
-            c2.write(f"**ID:** {row['id']} | **Primary:** {row['name'] if table=='applicants' else row['username']}")
-            if table == "applicants": c2.caption(row['proposal_title'])
+            # Edit Button Logic
+            with e_col3.expander("📝 Edit Details"):
+                with st.form(f"edit_{table}_{row['id']}"):
+                    if table == "applicants":
+                        new_n = st.text_input("Name", value=row['name'])
+                        new_t = st.text_area("Title", value=row['proposal_title'])
+                        new_l = st.text_input("Link", value=row['info_link'])
+                        new_p = st.file_uploader("Update Photo", type=['png', 'jpg'])
+                        if st.form_submit_button("Update Applicant"):
+                            p_data = new_p.getvalue() if new_p else row['photo']
+                            with engine.begin() as conn:
+                                conn.execute(text("UPDATE applicants SET name=:n, proposal_title=:t, info_link=:l, photo=:p WHERE id=:id"), {"n":new_n,"t":new_t,"l":new_l,"p":p_data, "id":row['id']})
+                            st.rerun()
+                    else:
+                        new_fn = st.text_input("Full Name", value=row['full_name'])
+                        new_pw = st.text_input("New Password (Leave blank to keep)", type="password")
+                        if st.form_submit_button("Update User"):
+                            with engine.begin() as conn:
+                                if new_pw:
+                                    conn.execute(text(f"UPDATE {table} SET full_name=:fn, password_hash=:p WHERE id=:id"), {"fn":new_fn, "p":hash_password(new_pw), "id":row['id']})
+                                else:
+                                    conn.execute(text(f"UPDATE {table} SET full_name=:fn WHERE id=:id"), {"fn":new_fn, "id":row['id']})
+                            st.rerun()
             
-            if c3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
+            if e_col3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
 
 elif menu == "Review Form":
@@ -162,7 +189,6 @@ elif menu == "Review Form":
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
-        # Individual Form View
         name = st.session_state.active_review_app
         app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
         rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), engine, params={"u": st.session_state.username, "a": name})
@@ -171,8 +197,7 @@ elif menu == "Review Form":
         with st.container(border=True):
             col_img, col_txt = st.columns([1, 4])
             with col_img:
-                if app['photo']:
-                    st.image(bytes(app['photo']), width=150, caption="Passport (Click to Zoom)")
+                if app['photo']: st.image(bytes(app['photo']), width=150, caption="Passport Zoom")
             with col_txt:
                 st.subheader(name)
                 st.write(app['proposal_title'])
@@ -193,10 +218,12 @@ elif menu == "Review Form":
             st.rerun()
 
     else:
-        # Gallery View
+        # Upgrade 3: Gallery View with Status & Photos
         apps = pd.read_sql("SELECT * FROM applicants", engine)
-        revs = pd.read_sql(text("SELECT applicant_name FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})['applicant_name'].tolist()
+        rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
+        revs_dict = dict(zip(rev_records['applicant_name'], rev_records['final_recommendation']))
         
+        st.subheader("Applicant Gallery")
         for i in range(0, len(apps), 4):
             cols = st.columns(4)
             for j in range(4):
@@ -204,16 +231,46 @@ elif menu == "Review Form":
                     row = apps.iloc[i+j]
                     with cols[j]:
                         with st.container(border=True):
-                            if row['photo']:
-                                st.image(bytes(row['photo']), width=120) # Passport Size Gallery
+                            # Passport Photo in card
+                            if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
+                            else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
+                            
                             st.write(f"**{row['name']}**")
-                            done = row['name'] in revs
-                            if st.button("Edit" if done else "Start", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
+                            
+                            # Status indicator
+                            status = revs_dict.get(row['name'])
+                            if status:
+                                st.success(f"✅ Saved: {status}")
+                            else:
+                                st.warning("⏳ Still Pending")
+                            
+                            if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                 st.session_state.active_review_app = row['name']
                                 st.rerun()
 
-        if not is_locked and len(revs) >= len(apps) > 0:
+        if not is_locked and len(revs_dict) >= len(apps) > 0:
             if st.button("🚀 FINAL SUBMIT ALL", type="primary", use_container_width=True):
                 with engine.begin() as conn:
                     conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
                 st.rerun()
+
+elif menu == "My Submissions":
+    # Upgrade 4: Submissions with Photos and Justification
+    st.header("📋 My Saved Submissions")
+    my_revs = pd.read_sql(text("""
+        SELECT r.*, a.photo 
+        FROM reviews r 
+        JOIN applicants a ON r.applicant_name = a.name 
+        WHERE r.reviewer_username = :u
+    """), engine, params={"u": st.session_state.username})
+    
+    if my_revs.empty:
+        st.info("You haven't saved any reviews yet.")
+    else:
+        for _, row in my_revs.iterrows():
+            with st.container(border=True):
+                sub1, sub2 = st.columns([1, 5])
+                if row['photo']: sub1.image(bytes(row['photo']), width=100)
+                sub2.write(f"### {row['applicant_name']}")
+                sub2.write(f"**Recommendation:** {row['final_recommendation']}")
+                sub2.info(f"**Justification:** {row['overall_justification']}")
