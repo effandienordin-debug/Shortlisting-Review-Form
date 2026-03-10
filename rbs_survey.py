@@ -280,7 +280,7 @@ elif menu == "Review Form":
             # Uses your strict 4-section question engine
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
             
-    if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
+if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
     # VALIDATION: List of all mandatory Yes/No codes
     mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
     
@@ -374,6 +374,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
