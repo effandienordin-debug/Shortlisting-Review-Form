@@ -27,17 +27,19 @@ with engine.begin() as conn:
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS applicants (
             id SERIAL PRIMARY KEY,
-            name VARCHAR(255),
+            name VARCHAR(255) UNIQUE,
             proposal_title TEXT,
             info_link TEXT,
             photo BYTEA
         )
     """))
     conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS photo BYTEA"))
+    
+    # ADDED: Foreign Key REFERENCES to strictly link back to the users table
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS reviews (
             id SERIAL PRIMARY KEY,
-            reviewer_username VARCHAR(255),
+            reviewer_username VARCHAR(255) REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL,
             applicant_name VARCHAR(255),
             responses TEXT,
             final_recommendation VARCHAR(50),
@@ -70,7 +72,7 @@ def get_radio_index(prev_dict, key):
 def edit_user_dialog(user_id, current_fn, current_un, current_em):
     new_fn = st.text_input("Full Name", current_fn)
     new_un = st.text_input("Username", current_un)
-    # Email is now optional
+    # Email is optional
     new_em = st.text_input("Email (Optional)", current_em if pd.notna(current_em) else "")
     new_pw = st.text_input("New Password (Leave blank to keep current)", type="password")
     new_img = st.file_uploader("Update Profile Picture", type=['jpg', 'png'])
@@ -381,7 +383,6 @@ elif menu in ["User Management", "Reviewer Management"]:
                         line = line.strip()
                         if not line: continue
                         
-                        # Smart check to handle Excel pastes (Tabs) or Comma pastes
                         separator = '\t' if '\t' in line else ','
                         parts = [x.strip() for x in line.split(separator)]
                         
@@ -389,7 +390,6 @@ elif menu in ["User Management", "Reviewer Management"]:
                             un_val = parts[0]
                             fn_val = parts[1]
                             em_val = parts[2] if len(parts) >= 3 else ""
-                            # Added ON CONFLICT (username) to safely ignore duplicates
                             conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role) VALUES (:un, :fn, :em, :pw, :r) ON CONFLICT (username) DO NOTHING"),
                                          {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw, "r": role_target})
                 st.session_state.success_msg = "Bulk addition processed successfully!"
@@ -448,11 +448,9 @@ elif menu == "Applicant Management":
                         line = line.strip()
                         if not line: continue
                         
-                        # Smart check to handle Excel pastes (Tabs) or Comma pastes
                         separator = '\t' if '\t' in line else ','
                         
                         if separator == ',':
-                            # Split by max 2 commas, just in case the proposal title contains commas
                             parts = [x.strip() for x in line.split(',', 2)]
                         else:
                             parts = [x.strip() for x in line.split('\t')]
