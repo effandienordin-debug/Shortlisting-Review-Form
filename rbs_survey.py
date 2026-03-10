@@ -1,132 +1,18 @@
 import streamlit as st
 import pandas as pd
-import bcrypt
 import json
-from sqlalchemy import create_engine, text
 import plotly.express as px
-from datetime import datetime, timedelta, timezone
+from sqlalchemy import text
+from database_utils import engine, init_db, check_password, hash_password, get_malaysia_time, delete_item
+from form_components import render_evaluation_fields
 
-# --- 1. Database & Helpers ---
-DB_URL = st.secrets["DATABASE_URL"]
-
-@st.cache_resource
-def get_engine():
-    # Pooling prevents the "slowness" by keeping connections ready
-    return create_engine(
-        DB_URL, 
-        pool_size=10, 
-        max_overflow=20, 
-        pool_pre_ping=True
-    )
-
-engine = get_engine()
-
-def hash_password(password):
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-def check_password(password, hashed):
-    try: 
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-    except: 
-        return False
-
-def get_malaysia_time():
-    my_tz = timezone(timedelta(hours=8))
-    return datetime.now(my_tz).strftime('%Y-%m-%d %H:%M:%S')
-
-def get_radio_index(prev_dict, key):
-    if not prev_dict: return None
-    val = prev_dict.get(key)
-    return 0 if val == "Yes" else (1 if val == "No" else None)
-
-def delete_item(table, item_id):
-    with engine.begin() as conn:
-        conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": item_id})
-    st.toast(f"Item deleted from {table}")
-    st.rerun()
-
-# --- 2. Database Schema (Maintained) ---
-@st.cache_resource
-def init_db():
-    with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50))"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), password_hash VARCHAR(255))"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS reviews (
-                id SERIAL PRIMARY KEY, reviewer_username VARCHAR(255), applicant_name VARCHAR(255), 
-                responses TEXT, final_recommendation VARCHAR(50), overall_justification TEXT, 
-                submitted_at TIMESTAMP, updated_at TIMESTAMP, is_final BOOLEAN DEFAULT FALSE
-            )
-        """))
-        # Check for default admin
-        res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0]
-        if res == 0:
-            conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), 
-                         {"pw": hash_password("Admin123!")})
-    return True
-
+# Initializing DB
 init_db()
 
-# --- 3. Shared Form Component (Strict Question Set) ---
-def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
-    if prev_resp is None: prev_resp = {}
-    if prev_data is None: prev_data = {}
-    
-    sections = [
-        ("Section 1 — Research Quality and Feasibility", [
-            ("12a", "Are the proposed methods and objectives appropriate and achievable within the grant period (2 years)?"), 
-            ("12b", "Does the applicant have relevant expertise and a strong research track record?"), 
-            ("12c", "Have potential risks been identified, and are there plans to address them?")
-        ]),
-        ("Section 2 — Potential Impact", [
-            ("14a", "Does the research address an important issue in medical science?"), 
-            ("14b", "Does it have the potential to contribute to significant advancements in the medical field?")
-        ]),
-        ("Section 3 — Innovation and Novelty", [
-            ("16a", "Does the research propose a novel approach or methodology?")
-        ]),
-        ("Section 4 — Value for Money", [
-            ("18a", "Are the requested funds essential and appropriately allocated based on the importance of the research?")
-        ]),
-    ]
-    
-    responses = {}
-    for title, qs in sections:
-        st.subheader(title)
-        for code, label in qs:
-            current_idx = get_radio_index(prev_resp, code)
-            responses[code] = st.radio(
-                f"{label} *", 
-                ["Yes", "No"], 
-                index=current_idx, 
-                horizontal=True, 
-                disabled=disabled, 
-                key=f"q{code}"
-            )
-        
-        j_key = str(int(code[:2]) + 1) 
-        responses[j_key] = st.text_area(f"Justification ({title})", value=prev_resp.get(j_key, ""), disabled=disabled, key=f"j{j_key}")
-        st.divider()
-
-    st.subheader("Section 5 — Final Recommendation")
-    fr_val = prev_data.get('final_recommendation')
-    
-    q20 = st.radio(
-        "Considering the evaluations made above, do you recommend this application for further consideration? *", 
-        ["Yes", "No"], 
-        index=(0 if fr_val=="Yes" else (1 if fr_val=="No" else None)), 
-        horizontal=True, 
-        disabled=disabled
-    )
-    j21 = st.text_area("Final justification", value=prev_data.get('overall_justification', ""), disabled=disabled)
-    
-    return {"responses": responses, "recommendation": q20, "justification": j21}
-
-# --- 4. App Setup & Auth ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 
+# --- Authentication ---
 if not st.session_state.authenticated:
     st.title("🔐 RBS Login")
     with st.form("login"):
@@ -141,7 +27,7 @@ if not st.session_state.authenticated:
                     st.error("Invalid credentials")
     st.stop()
 
-# --- 5. Sidebar ---
+# --- Sidebar ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
     st.write(f"Role: {st.session_state.role}")
@@ -151,7 +37,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 6. Modules ---
+# --- Modules ---
 if menu == "Dashboard":
     st.header("📊 System Analytics")
     df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", engine)
@@ -233,54 +119,30 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
 
 elif menu == "Review Form":
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
-    st.info("""
-    The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
-    This shortlisting review form is to evaluate applications based on key criteria.
-    
-    **Instructions:**
-    Reviewers can access the applicants' information and supporting documents via the 'View Documents' Link provided in the applicant detail. 
-    Please refer to **Sheet 1: Summary** (the OneDrive link is provided in the table assigned to your name) before completing this form. 
-    Kindly review all materials thoroughly before making your recommendation.
-    """)
+    st.info("The RBS Grant supports outstanding researchers. Please refer to Sheet 1: Summary before completing this form.")
     st.divider()
     
     with st.container(border=True):
-        col_icon, col_greet = st.columns([1, 10])
-        with col_icon:
-            st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
-        with col_greet:
-            st.markdown(f"### Welcome back, {st.session_state.full_name}!")
-            st.caption(f"🔬 Logged in as: {st.session_state.username} | Role: Reviewer")
+        col_i, col_g = st.columns([1, 10])
+        col_i.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
+        col_g.markdown(f"### Welcome back, {st.session_state.full_name}!")
+        col_g.caption(f"🔬 Logged in as: {st.session_state.username}")
 
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
+        # --- Form View ---
         name = st.session_state.active_review_app
-        app_query = text("SELECT * FROM applicants WHERE name = :n")
-        app = pd.read_sql(app_query, engine, params={"n": name}).iloc[0]
-        rev_query = text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a")
-        rev = pd.read_sql(rev_query, engine, params={"u": st.session_state.username, "a": name})
+        app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
+        rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), engine, params={"u": st.session_state.username, "a": name})
         prev_resp = json.loads(rev.iloc[0]['responses']) if not rev.empty else None
-
-        with st.container(border=True):
-            col_img, col_txt = st.columns([1, 4])
-            with col_img:
-                if app['photo']: 
-                    st.image(bytes(app['photo']), width=150, caption="Passport Size (Click to Zoom)")
-            with col_txt:
-                st.subheader(name)
-                st.write(f"**Proposal:** {app['proposal_title']}")
-                st.markdown(f"🔗 [View Documents]({app['info_link']})")
 
         with st.form("eval_form"):
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
-            
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
                 mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
-                is_incomplete = any(res["responses"][c] is None for c in mandatory_codes) or res["recommendation"] is None
-                
-                if is_incomplete:
-                    st.error("⚠️ Please answer all mandatory questions marked with an asterisk (*) before saving.")
+                if any(res["responses"].get(c) is None for c in mandatory_codes) or res["recommendation"] is None:
+                    st.error("⚠️ Please answer all mandatory questions marked with *")
                 else:
                     with engine.begin() as conn:
                         if not rev.empty:
@@ -296,9 +158,9 @@ elif menu == "Review Form":
             st.session_state.active_review_app = None
             st.rerun()
     else:
+        # --- Gallery View ---
         apps = pd.read_sql("SELECT * FROM applicants", engine)
-        rev_records_query = text("SELECT applicant_name, final_recommendation, overall_justification FROM reviews WHERE reviewer_username = :u")
-        rev_records = pd.read_sql(rev_records_query, engine, params={"u": st.session_state.username})
+        rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation, overall_justification FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
         reviews_lookup = rev_records.set_index('applicant_name').to_dict('index')
         
         st.subheader("Applicant Gallery")
@@ -309,55 +171,32 @@ elif menu == "Review Form":
                     row = apps.iloc[i+j]
                     with cols[j]:
                         with st.container(border=True):
-                            if row['photo']: 
-                                st.image(bytes(row['photo']), use_container_width=True)
-                            else: 
-                                st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
-                            
+                            if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
                             st.write(f"**{row['name']}**")
-                            
                             if row['name'] in reviews_lookup:
-                                rev_data = reviews_lookup[row['name']]
-                                rec = rev_data['final_recommendation']
-                                color = "green" if rec == "Yes" else "red"
-                                st.markdown(f"**Status:** :green[✅ Saved]")
-                                st.markdown(f"**Final Recommendation:** :{color}[{rec}]")
-                                justification = rev_data['overall_justification'] or "No text provided."
-                                st.caption(f"💬**Final justification:** {justification[:80]}{'...' if len(justification) > 80 else ''}")
+                                st.markdown("**Status:** :green[✅ Saved]")
                             else:
-                                st.markdown("**Status:** :orange[⏳ Awaiting Review]")
-                                st.caption("No justification saved yet.")
-                            
-                            if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
+                                st.markdown("**Status:** :orange[⏳ Pending]")
+                            if st.button("Review", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                 st.session_state.active_review_app = row['name']
                                 st.rerun()
 
         if not is_locked and len(reviews_lookup) >= len(apps) > 0:
-            st.divider()
-            if st.button("🚀 FINAL SUBMIT ALL REVIEWS", type="primary", use_container_width=True):
+            if st.button("🚀 FINAL SUBMIT ALL", type="primary", use_container_width=True):
                 with engine.begin() as conn:
                     conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
-                st.balloons()
-                st.rerun()
+                st.balloons(); st.rerun()
 
 elif menu == "My Submissions":
     st.header("📋 My Saved Submissions")
-    query = text("""
-        SELECT r.*, a.photo 
-        FROM reviews r 
-        JOIN applicants a ON r.applicant_name = a.name 
-        WHERE r.reviewer_username = :u
-    """)
-    my_revs = pd.read_sql(query, engine, params={"u": st.session_state.username})
-    
+    my_revs = pd.read_sql(text("SELECT r.*, a.photo FROM reviews r JOIN applicants a ON r.applicant_name = a.name WHERE r.reviewer_username = :u"), engine, params={"u": st.session_state.username})
     if my_revs.empty:
         st.info("You haven't saved any reviews yet.")
     else:
         for _, row in my_revs.iterrows():
             with st.container(border=True):
-                sub1, sub2 = st.columns([1, 5])
-                if row['photo']: 
-                    sub1.image(bytes(row['photo']), use_container_width=True)
-                sub2.write(f"### {row['applicant_name']}")
-                sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
-                sub2.info(f"**Final justification:** {row['overall_justification']}")
+                s1, s2 = st.columns([1, 5])
+                if row['photo']: s1.image(bytes(row['photo']), use_container_width=True)
+                s2.write(f"### {row['applicant_name']}")
+                s2.write(f"**Recommendation:** {row['final_recommendation']}")
+                s2.info(f"**Justification:** {row['overall_justification']}")
