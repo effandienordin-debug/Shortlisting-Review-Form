@@ -295,8 +295,9 @@ elif menu == "My Submissions":
                 sub1, sub2 = st.columns([1, 5])
                 if row['photo']: sub1.image(bytes(row['photo']), width=100)
                 sub2.write(f"### {row['applicant_name']}")
-                sub2.write(f"**Recommendation:** {row['final_recommendation']}")
-                sub2.info(f"**Justification:** {row['overall_justification']}")
+                sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
+                sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
