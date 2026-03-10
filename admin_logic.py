@@ -3,9 +3,14 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
 
+# Cache analytics to avoid heavy recalculations
+@st.cache_data(ttl=60)
+def get_analytics_data(_engine):
+    return pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", _engine)
+
 def render_dashboard(engine):
     st.header("📊 System Analytics")
-    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", engine)
+    df = get_analytics_data(engine)
     
     if not df.empty:
         met1, met2, met3 = st.columns(3)
@@ -33,20 +38,35 @@ def render_management(menu_title, engine, hash_password, delete_item):
     table = mapping[menu_title]
     st.header(f"⚙️ {menu_title}")
     
-    with st.expander(f"➕ Add New {menu_title[:-11]}"):
+    with st.expander(f"➕ Add New Entry"):
         with st.form(f"add_{table}"):
             if table == "applicants":
-                n, t, l = st.text_input("Name"), st.text_area("Title"), st.text_input("Link")
+                n = st.text_input("Full Name *")
+                t = st.text_area("Proposal Title *")
+                l = st.text_input("Document Link")
                 p = st.file_uploader("Photo", type=['png', 'jpg'])
             else:
-                un, fn, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Password", type="password")
+                un = st.text_input("Username *")
+                fn = st.text_input("Full Name *")
+                pw = st.text_input("Password *", type="password")
             
             if st.form_submit_button("Save"):
+                # VALIDATION: Check for blank fields
+                if table == "applicants":
+                    if not n.strip() or not t.strip():
+                        st.error("⚠️ Name and Title cannot be blank.")
+                        st.stop()
+                else:
+                    if not un.strip() or not fn.strip() or not pw.strip():
+                        st.error("⚠️ Username, Full Name, and Password cannot be blank.")
+                        st.stop()
+
                 with engine.begin() as conn:
                     if table == "applicants":
                         conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link, photo) VALUES (:n, :t, :l, :p)"), {"n":n,"t":t,"l":l,"p":p.getvalue() if p else None})
                     else:
                         conn.execute(text(f"INSERT INTO {table} (username, full_name, password_hash) VALUES (:u, :fn, :p)"), {"u":un, "fn":fn, "p":hash_password(pw)})
+                st.cache_data.clear() # Clear cache to show new data
                 st.rerun()
 
     data = pd.read_sql(f"SELECT * FROM {table}", engine)
