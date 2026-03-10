@@ -3,6 +3,10 @@ import pandas as pd
 import json
 from sqlalchemy import text
 
+@st.cache_data(ttl=60)
+def get_applicants_list(_engine):
+    return pd.read_sql("SELECT * FROM applicants", _engine)
+
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
     st.info("Review materials thoroughly before making your recommendation.")
@@ -38,8 +42,10 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
         if st.button("⬅️ Back to Gallery"):
             st.session_state.active_review_app = None
             st.rerun()
+            pass
     else:
-        apps = pd.read_sql("SELECT * FROM applicants", engine)
+        apps = get_applicants_list(engine)
+        # -- apps = pd.read_sql("SELECT * FROM applicants", engine)--
         rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation, overall_justification FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
         reviews_lookup = rev_records.set_index('applicant_name').to_dict('index')
         
