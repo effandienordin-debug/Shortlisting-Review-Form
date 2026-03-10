@@ -11,7 +11,7 @@ def get_applicants_list(_engine):
     # Wrapping the read_sql in a standard DataFrame constructor 
     # ensures the return value is a clean, serializable object.
     df = pd.read_sql(query, _engine)
-    return df
+    return df.copy()
 
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
