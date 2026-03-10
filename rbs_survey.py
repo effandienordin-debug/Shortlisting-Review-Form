@@ -259,7 +259,7 @@ elif menu == "Review Form":
                                 # Show snippet of the last justification
                                 justification = rev_data['overall_justification'] or "No text provided."
                                 # Limit text to 80 characters for the card view
-                                st.caption(f"💬**Final justification** {justification[:80]}{'...' if len(justification) > 80 else ''}")
+                                st.caption(f"💬**Final justification:**  {justification[:80]}{'...' if len(justification) > 80 else ''}")
                             else:
                                 st.markdown("**Status:** :orange[⏳ Awaiting Review]")
                                 st.caption("No justification saved yet.")
@@ -297,6 +297,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Justification:** {row['overall_justification']}")
+
 
 
 
