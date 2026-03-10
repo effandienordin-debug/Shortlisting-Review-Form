@@ -18,16 +18,26 @@ def get_report_data(_engine):
     return pd.read_sql(text(query), _engine)
 
 def render_reporting(engine):
-    # 1. ADDED "NO-PRINT" CLASS TO CSS
+    # --- 1. CSS PRINT HACK (Updated to hide toasts and align layout) ---
     st.markdown("""
         <style>
         @media print {
-            /* Hide the actual Print buttons and Streamlit UI */
-            .stButton, [data-testid="stSidebar"], header, footer, #MainMenu {
+            /* Hide Sidebar, Header, Footer, and Navigation */
+            [data-testid="stSidebar"], header, footer, #MainMenu {
                 display: none !important;
             }
+            /* HIDE TOAST NOTIFICATIONS (Prevents overlap with title) */
+            [data-testid="stToast"] {
+                display: none !important;
+            }
+            /* Hide all buttons during print */
+            .stButton {
+                display: none !important;
+            }
+            /* Adjust margins for a clean PDF layout */
             .main .block-container {
-                padding: 1rem !important;
+                padding-top: 1rem !important;
+                max-width: 100% !important;
             }
         }
         </style>
@@ -40,8 +50,7 @@ def render_reporting(engine):
         st.info("No data available yet.")
         return
 
-    # --- 2. FILTER SECTION ---
-    # Wrap filters in a container so we can identify them (optional)
+    # --- 2. FILTERS (Hides in Print automatically due to .stButton/expander logic) ---
     with st.expander("🔍 Filter Results"):
         c1, c2 = st.columns(2)
         f_rec = c1.multiselect("Recommendation", df['final_recommendation'].unique(), default=df['final_recommendation'].unique())
@@ -58,13 +67,13 @@ def render_reporting(engine):
     col1.plotly_chart(fig1, use_container_width=True)
     col2.plotly_chart(fig2, use_container_width=True)
 
-    # --- 4. EXPORT ACTIONS ---
+    # --- 4. ALIGNED EXPORT BUTTONS ---
     st.divider()
     btn_col1, btn_col2 = st.columns(2)
 
-    # This triggers the window.print() command via Javascript
-    if st.button("🖨️ Generate Professional PDF", use_container_width=True, type="primary"):
-        # We use window.parent.print() to escape the Streamlit iframe
+    # Print Button
+    if btn_col1.button("🖨️ Generate Professional PDF", use_container_width=True, type="primary"):
+        # parent.print() escapes the iframe to print the full page
         st.components.v1.html("""
             <script>
                 window.parent.print();
@@ -72,8 +81,9 @@ def render_reporting(engine):
         """, height=0)
         st.toast("Opening Print Dialog... Select 'Save as PDF'.")
 
+    # CSV Button (Aligned perfectly next to Print)
     btn_col2.download_button(
-        "📊 Download Data (CSV)",
+        label="📊 Download Data (CSV)",
         data=filtered_df.to_csv(index=False),
         file_name="RBS_Data_Export.csv",
         mime="text/csv",
