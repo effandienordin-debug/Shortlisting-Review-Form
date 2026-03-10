@@ -301,7 +301,7 @@ if not is_locked and st.form_submit_button("💾 Save Draft", use_container_widt
         st.session_state.active_review_app = None
         st.rerun()
 
-    else:
+          else:
         # --- APPLICANT GALLERY VIEW ---
         apps = pd.read_sql("SELECT * FROM applicants", engine)
         # Fetch existing reviews to show Recommendation and Justification on the card
@@ -374,6 +374,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
