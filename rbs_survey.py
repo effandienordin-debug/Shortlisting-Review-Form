@@ -14,8 +14,8 @@ def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def check_password(password, hashed):
-try: 
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+   try: 
+       return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 except: 
     return False
 
@@ -381,6 +381,7 @@ else:
             sub2.write(f"### {row['applicant_name']}")
             sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
             sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
