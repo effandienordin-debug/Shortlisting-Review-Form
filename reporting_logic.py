@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
-import io
 
 @st.cache_resource(ttl=60)
 def get_report_data(_engine):
@@ -19,6 +18,37 @@ def get_report_data(_engine):
     return pd.read_sql(text(query), _engine)
 
 def render_reporting(engine):
+    # --- 1. CSS PRINT HACK ---
+    # This hides Streamlit-specific UI elements during printing
+    st.markdown("""
+        <style>
+        @media print {
+            /* Hide Sidebar */
+            [data-testid="stSidebar"] {
+                display: none !important;
+            }
+            /* Hide Top Header/Nav */
+            header {
+                visibility: hidden !important;
+            }
+            /* Hide Streamlit Footer/Menu */
+            #MainMenu, footer {
+                visibility: hidden !important;
+            }
+            /* Adjust padding for the main report */
+            .main .block-container {
+                padding-top: 1rem !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+            /* Force charts to stay visible */
+            .element-container {
+                page-break-inside: avoid;
+            }
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.header("📄 Grant Reporting Center")
     df = get_report_data(engine)
 
@@ -26,7 +56,8 @@ def render_reporting(engine):
         st.info("No data available yet.")
         return
 
-    # --- 1. FILTER SECTION ---
+    # --- 2. FILTER SECTION ---
+    # Wrap filters in a container so we can identify them (optional)
     with st.expander("🔍 Filter Results"):
         c1, c2 = st.columns(2)
         f_rec = c1.multiselect("Recommendation", df['final_recommendation'].unique(), default=df['final_recommendation'].unique())
@@ -34,7 +65,7 @@ def render_reporting(engine):
     
     filtered_df = df[(df['final_recommendation'].isin(f_rec)) & (df['reviewer_name'].isin(f_rev))]
 
-    # --- 2. VISUALS (Graphs) ---
+    # --- 3. VISUALS ---
     fig1 = px.pie(filtered_df, names='final_recommendation', title="Overall Recommendation Split")
     fig2 = px.bar(filtered_df.groupby(['applicant_name', 'final_recommendation']).size().reset_index(name='count'), 
                   x='applicant_name', y='count', color='final_recommendation', title="Applicant Breakdown")
@@ -43,22 +74,19 @@ def render_reporting(engine):
     col1.plotly_chart(fig1, use_container_width=True)
     col2.plotly_chart(fig2, use_container_width=True)
 
-    # --- 3. EXPORT ACTIONS ---
+    # --- 4. EXPORT ACTIONS ---
     st.divider()
-    st.subheader("📥 Export Options")
-    
-    btn_col1, btn_col2, btn_col3 = st.columns(3)
+    btn_col1, btn_col2 = st.columns(2)
 
-    # Browser Print Method (No Kaleido Required)
-    if btn_col1.button("🖨️ Print to PDF (Browser)", use_container_width=True):
+    # This triggers the window.print() command via Javascript
+    if btn_col1.button("🖨️ Generate Professional PDF", use_container_width=True, type="primary"):
         st.components.v1.html("""
             <script>
                 window.print();
             </script>
         """, height=0)
-        st.info("💡 Hint: Select 'Save as PDF' in the print destination.")
+        st.toast("Print dialog opened! Remember to select 'Save as PDF'.")
 
-    # CSV Export (Standard)
     btn_col2.download_button(
         "📊 Download Data (CSV)",
         data=filtered_df.to_csv(index=False),
@@ -66,10 +94,7 @@ def render_reporting(engine):
         mime="text/csv",
         use_container_width=True
     )
-    
-    # Optional: Display CSV Info
-    btn_col3.info("CSV contains raw filtered data.")
 
-    # --- 4. DATA PREVIEW ---
-    st.subheader("📋 Data Preview")
-    st.dataframe(filtered_df, use_container_width=True)
+    # --- 5. DATA PREVIEW ---
+    st.subheader("📋 Data Summary")
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
