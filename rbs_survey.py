@@ -4,17 +4,19 @@ import bcrypt
 from sqlalchemy import create_engine, text
 import plotly.express as px
 import json
+import io
 from datetime import datetime, timedelta, timezone
 import extra_streamlit_components as stx
 
 # --- 1. Database & Cookie Setup ---
 @st.cache_resource
 def get_engine():
+    # Uses your secret DATABASE_URL from Streamlit Cloud
     return create_engine(st.secrets["DATABASE_URL"])
 
 engine = get_engine()
 
-@st.cache_resource
+# Cookie manager must be outside cache because it is a widget
 def get_cookie_manager():
     return stx.CookieManager()
 
@@ -37,7 +39,7 @@ def get_radio_index(prev_dict, key):
     if val == "No": return 1
     return None
 
-# --- 3. Standardized Question Engine (NO NUMBERS) ---
+# --- 3. Standardized Question Engine (Clean & No Numbers) ---
 def render_evaluation_fields(prev_resp=None, is_edit=False):
     prefix = "e_" if is_edit else "n_"
     if prev_resp is None: prev_resp = {}
@@ -56,43 +58,34 @@ def render_evaluation_fields(prev_resp=None, is_edit=False):
                     ["Yes", "No"], index=get_radio_index(prev_resp, "14a"), horizontal=True, key=f"{prefix}q14a")
     q14b = st.radio("b) Does it have the potential to contribute to significant advancements in the medical field?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "14b"), horizontal=True, key=f"{prefix}q14b")
-    j15 = st.text_area("Justification (if any)", value=prev_resp.get("15", ""), key=f"{prefix}j15", help="Potential Impact Justification")
+    j15 = st.text_area("Justification (if any)", value=prev_resp.get("15", ""), key=f"{prefix}j15")
 
     st.subheader("Innovation and Novelty")
     q16a = st.radio("a) Does the research propose a novel approach or methodology?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "16a"), horizontal=True, key=f"{prefix}q16a")
-    j17 = st.text_area("Justification (if any)", value=prev_resp.get("17", ""), key=f"{prefix}j17", help="Innovation Justification")
+    j17 = st.text_area("Justification (if any)", value=prev_resp.get("17", ""), key=f"{prefix}j17")
 
     st.subheader("Value for Money")
     q18a = st.radio("a) Are the requested funds essential and appropriately allocated based on the importance of the research?", 
                     ["Yes", "No"], index=get_radio_index(prev_resp, "18a"), horizontal=True, key=f"{prefix}q18a")
-    j19 = st.text_area("Justification (if any)", value=prev_resp.get("19", ""), key=f"{prefix}j19", help="Value for Money Justification")
+    j19 = st.text_area("Justification (if any)", value=prev_resp.get("19", ""), key=f"{prefix}j19")
 
     responses = {"12a": q12a, "12b": q12b, "12c": q12c, "13": j13, "14a": q14a, "14b": q14b, "15": j15, "16a": q16a, "17": j17, "18a": q18a, "19": j19}
     is_complete = all(x is not None for x in [q12a, q12b, q12c, q14a, q14b, q16a, q18a])
     return responses, is_complete
 
-# --- 4. Database Setup (Self-Healing) ---
+# --- 4. Database Schema Setup ---
 with engine.begin() as conn:
     conn.execute(text("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), email VARCHAR(255), password_hash VARCHAR(255), role VARCHAR(50), profile_pic BYTEA)"))
     conn.execute(text("CREATE TABLE IF NOT EXISTS reviewers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE, full_name VARCHAR(255), email VARCHAR(255), password_hash VARCHAR(255), profile_pic BYTEA)"))
     conn.execute(text("CREATE TABLE IF NOT EXISTS applicants (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE, proposal_title TEXT, info_link TEXT, photo BYTEA)"))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS reviews (
-            id SERIAL PRIMARY KEY, 
-            reviewer_username VARCHAR(255) REFERENCES reviewers(username) ON UPDATE CASCADE ON DELETE SET NULL, 
-            applicant_name VARCHAR(255), 
-            responses TEXT, 
-            final_recommendation VARCHAR(50), 
-            overall_justification TEXT, 
-            submitted_at TIMESTAMP, 
-            updated_at TIMESTAMP
-        )
-    """))
+    conn.execute(text("CREATE TABLE IF NOT EXISTS reviews (id SERIAL PRIMARY KEY, reviewer_username VARCHAR(255) REFERENCES reviewers(username) ON UPDATE CASCADE ON DELETE SET NULL, applicant_name VARCHAR(255), responses TEXT, final_recommendation VARCHAR(50), overall_justification TEXT, submitted_at TIMESTAMP, updated_at TIMESTAMP)"))
+    
+    # Auto-admin check
     if conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0] == 0:
         conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), {"pw": hash_password("Admin123!")})
 
-# --- 5. Persistence Logic ---
+# --- 5. Persistence & Auth Logic ---
 if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 
 saved_user = cookie_manager.get(cookie="rbs_user")
@@ -146,41 +139,7 @@ if 'success_msg' in st.session_state:
     st.success(st.session_state.success_msg); del st.session_state.success_msg
 
 # --- PAGE LOGIC ---
-if menu == "Dashboard":
-    st.header("📊 Admin Dashboard")
-    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, submitted_at FROM reviews", engine)
-    if not df.empty:
-        c1, c2 = st.columns(2)
-        c1.metric("Total Reviews", len(df))
-        fig = px.pie(df, names='final_recommendation', title="Overall Recommendation Split", color_discrete_map={"Yes":"#28a745", "No":"#dc3545"})
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(df, use_container_width=True)
-
-elif menu == "Reviewer Management":
-    st.header("👤 Reviewer Management")
-    with st.expander("Add New Reviewer"):
-        with st.form("add_rev"):
-            un, fn, em, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Email"), st.text_input("Password", type="password")
-            if st.form_submit_button("Add"):
-                with engine.begin() as conn:
-                    conn.execute(text("INSERT INTO reviewers (username, full_name, email, password_hash) VALUES (:u, :f, :e, :p)"), {"u":un, "f":fn, "e":em, "p":hash_password(pw)})
-                st.rerun()
-    revs = pd.read_sql("SELECT id, username, full_name, email FROM reviewers", engine)
-    st.dataframe(revs, use_container_width=True)
-
-elif menu == "Applicant Management":
-    st.header("📝 Applicant Management")
-    with st.expander("Add New Applicant"):
-        with st.form("add_app"):
-            an, at, al = st.text_input("Name"), st.text_area("Proposal Title"), st.text_input("OneDrive Link")
-            if st.form_submit_button("Add"):
-                with engine.begin() as conn:
-                    conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l)"), {"n":an, "t":at, "l":al})
-                st.rerun()
-    apps = pd.read_sql("SELECT id, name, proposal_title FROM applicants", engine)
-    st.dataframe(apps, use_container_width=True)
-
-elif menu == "Review Form":
+if menu == "Review Form":
     st.title("Dr Ranjeet Bhagwan Singh Medical Research Grant Review")
     st.subheader(f"👋 Welcome, {st.session_state.full_name}!")
     
@@ -240,6 +199,38 @@ elif menu == "My Submissions":
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"): edit_review_dialog(row)
 
-# SECTION PLACEHOLDER FOR OTHER MODULES
+elif menu == "Applicant Management":
+    st.header("📝 Applicant Management")
+    t1, t2 = st.tabs(["Add Individual", "Bulk Add"])
+    with t1:
+        with st.expander("➕ Create New Applicant"):
+            with st.form("add_app"):
+                an, at, al = st.text_input("Name"), st.text_area("Proposal Title"), st.text_input("OneDrive Link")
+                ap = st.file_uploader("Applicant Photo", type=['jpg', 'png'])
+                if st.form_submit_button("Add"):
+                    p_data = ap.getvalue() if ap else None
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link, photo) VALUES (:n, :t, :l, :p)"), {"n": an, "t": at, "l": al, "p": p_data})
+                    st.rerun()
+    with t2:
+        st.info("Format: Name, Proposal Title, Link (CSV Format)")
+        uploaded_file = st.file_uploader("Upload CSV", type="csv")
+        if uploaded_file and st.button("Process Bulk"):
+            bulk_df = pd.read_csv(uploaded_file)
+            with engine.begin() as conn:
+                for _, r in bulk_df.iterrows():
+                    conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l) ON CONFLICT (name) DO NOTHING"), {"n": r['name'], "t": r['proposal_title'], "l": r['info_link']})
+            st.success("Applicants added!"); st.rerun()
+    apps = pd.read_sql("SELECT id, name, proposal_title FROM applicants", engine)
+    st.dataframe(apps, use_container_width=True)
+
+elif menu == "Dashboard":
+    st.header("📊 Admin Dashboard")
+    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation FROM reviews", engine)
+    if not df.empty:
+        st.metric("Total Reviews", len(df))
+        st.dataframe(df, use_container_width=True)
+
+# ... Placeholders for other Management modules ...
 else:
-    st.info(f"Module {menu} is online.")
+    st.info(f"The {menu} module is active.")
