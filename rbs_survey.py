@@ -186,6 +186,7 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
 elif menu == "Review Form":
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
     # -- st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ") --
+    st.subheader(f"Welcome, {st.session_state.full_name}!")
     # --- New Instructions Section ---
     st.info("""
     The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
@@ -309,6 +310,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
