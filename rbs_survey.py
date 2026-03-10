@@ -13,6 +13,7 @@ engine = create_engine(DB_URL)
 
 # --- 2. Database Schema Self-Healing ---
 with engine.begin() as conn:
+    # Admins Table
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -24,6 +25,18 @@ with engine.begin() as conn:
             profile_pic BYTEA
         )
     """))
+    # Reviewers Table
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS reviewers (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(255) UNIQUE,
+            full_name VARCHAR(255),
+            email VARCHAR(255),
+            password_hash VARCHAR(255),
+            profile_pic BYTEA
+        )
+    """))
+    # Applicants Table
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS applicants (
             id SERIAL PRIMARY KEY,
@@ -35,11 +48,11 @@ with engine.begin() as conn:
     """))
     conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS photo BYTEA"))
     
-    # ADDED: Foreign Key REFERENCES to strictly link back to the users table
+    # Reviews Table (Linked to reviewers table)
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS reviews (
             id SERIAL PRIMARY KEY,
-            reviewer_username VARCHAR(255) REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL,
+            reviewer_username VARCHAR(255) REFERENCES reviewers(username) ON UPDATE CASCADE ON DELETE SET NULL,
             applicant_name VARCHAR(255),
             responses TEXT,
             final_recommendation VARCHAR(50),
@@ -68,14 +81,15 @@ def get_radio_index(prev_dict, key):
     return None
 
 # --- 4. Popup Dialogs ---
-@st.dialog("Edit User Information")
+
+# Admin Dialogs
+@st.dialog("Edit Admin Information")
 def edit_user_dialog(user_id, current_fn, current_un, current_em):
     new_fn = st.text_input("Full Name", current_fn)
     new_un = st.text_input("Username", current_un)
-    # Email is optional
     new_em = st.text_input("Email (Optional)", current_em if pd.notna(current_em) else "")
     new_pw = st.text_input("New Password (Leave blank to keep current)", type="password")
-    new_img = st.file_uploader("Update Profile Picture", type=['jpg', 'png'])
+    new_img = st.file_uploader("Update Profile Picture", type=['jpg', 'png'], key="img_u")
     
     if st.button("Save Changes"):
         if not new_fn.strip() or not new_un.strip():
@@ -87,7 +101,6 @@ def edit_user_dialog(user_id, current_fn, current_un, current_em):
         with engine.begin() as conn:
             updates = ["full_name=:fn", "username=:un", "email=:em"]
             params = {"fn": new_fn, "un": new_un, "em": new_em, "id": int(user_id)}
-            
             if new_pw:
                 updates.append("password_hash=:pw")
                 params["pw"] = hash_password(new_pw)
@@ -98,21 +111,66 @@ def edit_user_dialog(user_id, current_fn, current_un, current_em):
             query = f"UPDATE users SET {', '.join(updates)} WHERE id=:id"
             conn.execute(text(query), params)
             
-        st.session_state.success_msg = "User successfully updated!"
+        st.session_state.success_msg = "Admin successfully updated!"
         st.rerun()
 
 @st.dialog("Confirm Deletion")
 def confirm_delete_user(user_id, username_str):
-    st.warning(f"Are you sure you want to delete **{username_str}**? This action cannot be undone.")
+    st.warning(f"Are you sure you want to delete Admin **{username_str}**? This action cannot be undone.")
     c1, c2 = st.columns(2)
     if c1.button("Yes, Delete", type="primary"):
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM users WHERE id=:id"), {"id": int(user_id)})
-        st.session_state.success_msg = f"User {username_str} has been deleted."
+        st.session_state.success_msg = f"Admin {username_str} has been deleted."
         st.rerun()
     if c2.button("Cancel"):
         st.rerun()
 
+# Reviewer Dialogs
+@st.dialog("Edit Reviewer Information")
+def edit_reviewer_dialog(rev_id, current_fn, current_un, current_em):
+    new_fn = st.text_input("Full Name", current_fn)
+    new_un = st.text_input("Username", current_un)
+    new_em = st.text_input("Email (Optional)", current_em if pd.notna(current_em) else "")
+    new_pw = st.text_input("New Password (Leave blank to keep current)", type="password")
+    new_img = st.file_uploader("Update Profile Picture", type=['jpg', 'png'], key="img_r")
+    
+    if st.button("Save Changes"):
+        if not new_fn.strip() or not new_un.strip():
+            st.warning("Full Name and Username cannot be blank.")
+            return
+            
+        img_data = new_img.getvalue() if new_img else None
+        
+        with engine.begin() as conn:
+            updates = ["full_name=:fn", "username=:un", "email=:em"]
+            params = {"fn": new_fn, "un": new_un, "em": new_em, "id": int(rev_id)}
+            if new_pw:
+                updates.append("password_hash=:pw")
+                params["pw"] = hash_password(new_pw)
+            if img_data:
+                updates.append("profile_pic=:p")
+                params["p"] = img_data
+                
+            query = f"UPDATE reviewers SET {', '.join(updates)} WHERE id=:id"
+            conn.execute(text(query), params)
+            
+        st.session_state.success_msg = "Reviewer successfully updated!"
+        st.rerun()
+
+@st.dialog("Confirm Deletion")
+def confirm_delete_reviewer(rev_id, username_str):
+    st.warning(f"Are you sure you want to delete Reviewer **{username_str}**? This action cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, Delete", type="primary"):
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM reviewers WHERE id=:id"), {"id": int(rev_id)})
+        st.session_state.success_msg = f"Reviewer {username_str} has been deleted."
+        st.rerun()
+    if c2.button("Cancel"):
+        st.rerun()
+
+# Applicant Dialogs
 @st.dialog("Edit Applicant Record")
 def edit_app_dialog(app_id, current_n, current_t, current_l):
     new_n = st.text_input("Name", current_n)
@@ -149,6 +207,7 @@ def confirm_delete_app(app_id, app_name):
     if c2.button("Cancel"):
         st.rerun()
 
+# Review Form Dialog
 @st.dialog("Edit Evaluation Form", width="large")
 def edit_review_dialog(edit_data):
     st.info(f"Editing Review for **{edit_data['applicant_name']}**")
@@ -220,17 +279,30 @@ if not st.session_state.authenticated:
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login"):
             with engine.connect() as conn:
-                res = conn.execute(text("SELECT password_hash, role, full_name, profile_pic FROM users WHERE username = :u"), {"u": u}).fetchone()
-                if res and check_password(p, res[0]):
+                # 1. Check if user is an Admin (in 'users' table)
+                res_admin = conn.execute(text("SELECT password_hash, full_name, profile_pic FROM users WHERE username = :u"), {"u": u}).fetchone()
+                
+                if res_admin and check_password(p, res_admin[0]):
                     st.session_state.authenticated = True
                     st.session_state.username = u
-                    st.session_state.role = res[1]
-                    st.session_state.full_name = res[2]
-                    st.session_state.pic = res[3]
-                    st.session_state.menu_choice = "Dashboard" if res[1] == 'Admin' else "Review Form"
+                    st.session_state.role = "Admin"
+                    st.session_state.full_name = res_admin[1]
+                    st.session_state.pic = res_admin[2]
+                    st.session_state.menu_choice = "Dashboard"
                     st.rerun()
                 else:
-                    st.error("Invalid credentials")
+                    # 2. Check if user is a Reviewer (in 'reviewers' table)
+                    res_rev = conn.execute(text("SELECT password_hash, full_name, profile_pic FROM reviewers WHERE username = :u"), {"u": u}).fetchone()
+                    if res_rev and check_password(p, res_rev[0]):
+                        st.session_state.authenticated = True
+                        st.session_state.username = u
+                        st.session_state.role = "Reviewer"
+                        st.session_state.full_name = res_rev[1]
+                        st.session_state.pic = res_rev[2]
+                        st.session_state.menu_choice = "Review Form"
+                        st.rerun()
+                    else:
+                        st.error("Invalid credentials")
     st.stop()
 
 # --- SIDEBAR ---
@@ -256,6 +328,7 @@ if 'success_msg' in st.session_state:
 if menu == "Dashboard":
     st.header("📊 Admin Dashboard")
     
+    # Query updated to join the new 'reviewers' table
     dashboard_query = text("""
         SELECT 
             u.full_name AS "Reviewer Name", 
@@ -266,7 +339,7 @@ if menu == "Dashboard":
             r.updated_at AS "Updated At",
             r.responses AS "Raw_Responses"
         FROM reviews r
-        LEFT JOIN users u ON r.reviewer_username = u.username
+        LEFT JOIN reviewers u ON r.reviewer_username = u.username
         LEFT JOIN applicants a ON r.applicant_name = a.name
         ORDER BY r.submitted_at DESC
     """)
@@ -349,29 +422,36 @@ if menu == "Dashboard":
 
 # --- ADMIN: REVIEWER/USER MGMT ---
 elif menu in ["User Management", "Reviewer Management"]:
-    role_target = "Reviewer" if menu == "Reviewer Management" else "Admin"
+    is_reviewer_menu = (menu == "Reviewer Management")
+    role_target = "Reviewer" if is_reviewer_menu else "Admin"
+    table_target = "reviewers" if is_reviewer_menu else "users"
+    
     st.header(f"👤 {menu}")
     
     t1, t2 = st.tabs(["Add Individual", "Bulk Add"])
     with t1:
         with st.expander(f"➕ Create New {role_target}"):
-            with st.form(f"add_u_{role_target}"):
+            with st.form(f"add_{table_target}"):
                 un, fn, em, pw = st.text_input("Username"), st.text_input("Full Name"), st.text_input("Email (Optional)"), st.text_input("Password", type="password")
                 pic = st.file_uploader("Profile Picture (Optional)", type=['jpg', 'png'])
-                if st.form_submit_button("Add User"):
+                if st.form_submit_button("Add Account"):
                     if not un.strip() or not fn.strip() or not pw.strip():
                         st.warning("Username, Full Name, and Password are required!")
                     else:
                         hashed = hash_password(pw)
                         pic_data = pic.getvalue() if pic else None
                         with engine.begin() as conn:
-                            conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role, profile_pic) VALUES (:un, :fn, :em, :pw, :r, :p)"),
-                                         {"un": un, "fn": fn, "em": em, "pw": hashed, "r": role_target, "p": pic_data})
+                            if is_reviewer_menu:
+                                conn.execute(text("INSERT INTO reviewers (username, full_name, email, password_hash, profile_pic) VALUES (:un, :fn, :em, :pw, :p)"),
+                                             {"un": un, "fn": fn, "em": em, "pw": hashed, "p": pic_data})
+                            else:
+                                conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role, profile_pic) VALUES (:un, :fn, :em, :pw, :r, :p)"),
+                                             {"un": un, "fn": fn, "em": em, "pw": hashed, "r": "Admin", "p": pic_data})
                         st.session_state.success_msg = f"{role_target} added successfully!"
                         st.rerun()
     with t2:
         st.info("Format: Username, Full Name, Email (Optional) - You can copy and paste directly from Excel!")
-        bulk_data = st.text_area("Paste Data")
+        bulk_data = st.text_area("Paste Data", key=f"bulk_{table_target}")
         if st.button("Process Bulk Add"):
             if not bulk_data.strip():
                 st.warning("Please provide data to process.")
@@ -390,18 +470,27 @@ elif menu in ["User Management", "Reviewer Management"]:
                             un_val = parts[0]
                             fn_val = parts[1]
                             em_val = parts[2] if len(parts) >= 3 else ""
-                            conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role) VALUES (:un, :fn, :em, :pw, :r) ON CONFLICT (username) DO NOTHING"),
-                                         {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw, "r": role_target})
+                            
+                            if is_reviewer_menu:
+                                conn.execute(text("INSERT INTO reviewers (username, full_name, email, password_hash) VALUES (:un, :fn, :em, :pw) ON CONFLICT (username) DO NOTHING"),
+                                             {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw})
+                            else:
+                                conn.execute(text("INSERT INTO users (username, full_name, email, password_hash, role) VALUES (:un, :fn, :em, :pw, :r) ON CONFLICT (username) DO NOTHING"),
+                                             {"un": un_val, "fn": fn_val, "em": em_val, "pw": default_pw, "r": "Admin"})
                 st.session_state.success_msg = "Bulk addition processed successfully!"
                 st.rerun()
 
     st.divider()
-    users = pd.read_sql(text("SELECT * FROM users WHERE role = :r"), engine, params={"r": role_target})
+    # Pull from the correct table
+    if is_reviewer_menu:
+        records = pd.read_sql(text("SELECT * FROM reviewers"), engine)
+    else:
+        records = pd.read_sql(text("SELECT * FROM users WHERE role = 'Admin'"), engine)
     
     h1, h2, h3, h4, h5 = st.columns([1, 2, 2, 2, 2])
     h1.write("**Pic**"); h2.write("**Full Name**"); h3.write("**Username**"); h4.write("**Email**"); h5.write("**Action**")
     
-    for _, row in users.iterrows():
+    for _, row in records.iterrows():
         c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 2, 2])
         if row['profile_pic']: c1.image(bytes(row['profile_pic']), width=40)
         else: c1.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=40)
@@ -412,10 +501,16 @@ elif menu in ["User Management", "Reviewer Management"]:
         
         with c5:
             b1, b2 = st.columns(2)
-            if b1.button("Edit", key=f"u_{row['id']}"): 
-                edit_user_dialog(row['id'], row['full_name'], row['username'], row['email'])
-            if b2.button("Delete", key=f"del_u_{row['id']}"):
-                confirm_delete_user(row['id'], row['full_name'])
+            if is_reviewer_menu:
+                if b1.button("Edit", key=f"r_{row['id']}"): 
+                    edit_reviewer_dialog(row['id'], row['full_name'], row['username'], row['email'])
+                if b2.button("Delete", key=f"del_r_{row['id']}"):
+                    confirm_delete_reviewer(row['id'], row['full_name'])
+            else:
+                if b1.button("Edit", key=f"u_{row['id']}"): 
+                    edit_user_dialog(row['id'], row['full_name'], row['username'], row['email'])
+                if b2.button("Delete", key=f"del_u_{row['id']}"):
+                    confirm_delete_user(row['id'], row['full_name'])
 
 # --- ADMIN: APPLICANT MGMT ---
 elif menu == "Applicant Management":
@@ -459,7 +554,7 @@ elif menu == "Applicant Management":
                             n_val = parts[0]
                             t_val = parts[1]
                             l_val = parts[2] if len(parts) >= 3 else ""
-                            conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l)"), {"n": n_val, "t": t_val, "l": l_val})
+                            conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l) ON CONFLICT DO NOTHING"), {"n": n_val, "t": t_val, "l": l_val})
                 st.session_state.success_msg = "Bulk applicants added successfully!"
                 st.rerun()
 
