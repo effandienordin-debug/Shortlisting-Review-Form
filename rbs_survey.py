@@ -6,8 +6,6 @@ from sqlalchemy import create_engine, text
 import plotly.express as px
 import json
 from datetime import datetime, timedelta, timezone
-import tempfile
-import os
 
 # --- 1. Database Configuration ---
 DB_URL = st.secrets["DATABASE_URL"]
@@ -341,52 +339,10 @@ if menu == "Dashboard":
 
         st.divider()
         st.subheader("📥 Export Reports")
-        ex_c1, ex_c2 = st.columns([1, 4])
         
-        ex_c1.download_button("Download Evaluation Records", data=display_df.to_csv(index=False).encode('utf-8'), file_name="RBS_Grant_Report.csv", mime="text/csv")
+        st.download_button("Download Evaluation Records (CSV)", data=display_df.to_csv(index=False).encode('utf-8'), file_name="RBS_Grant_Report.csv", mime="text/csv")
         
-        try:
-            from fpdf import FPDF
-            
-            def create_charts_pdf():
-                pdf = FPDF(orientation='L') 
-                pdf.add_page()
-                pdf.set_font("Arial", "B", 16)
-                pdf.cell(0, 10, "RBS Grant Evaluation Report - Dashboard Charts", ln=True, align="C")
-                pdf.ln(5)
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_app, \
-                     tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_pie, \
-                     tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_q:
-                    
-                    fig_app.write_image(tmp_app.name, format='png', engine='kaleido', width=800, height=500)
-                    fig_pie.write_image(tmp_pie.name, format='png', engine='kaleido', width=800, height=500)
-                    fig_q.write_image(tmp_q.name, format='png', engine='kaleido', width=1200, height=500)
-                    
-                    pdf.image(tmp_app.name, x=10, y=30, w=135)
-                    pdf.image(tmp_pie.name, x=150, y=30, w=135)
-                    
-                    pdf.add_page()
-                    pdf.set_font("Arial", "B", 16)
-                    pdf.cell(0, 10, "Detailed Assessment Criteria Statistics", ln=True, align="C")
-                    pdf.image(tmp_q.name, x=10, y=30, w=270)
-                    
-                os.unlink(tmp_app.name)
-                os.unlink(tmp_pie.name)
-                os.unlink(tmp_q.name)
-                
-                try:
-                    return pdf.output(dest='S').encode('latin-1')
-                except AttributeError:
-                    return bytes(pdf.output())
-
-            pdf_bytes = create_charts_pdf()
-            ex_c2.download_button("Download Analytics", data=pdf_bytes, file_name="RBS_Charts_Report.pdf", mime="application/pdf")
-            
-        except ImportError:
-            ex_c2.error("To enable PDF chart downloads, please install required packages: `pip install fpdf kaleido`")
-        except Exception as e:
-            ex_c2.error(f"Error generating PDF (Ensure `kaleido` is installed): {e}")
+        st.info("💡 **Tip for Admins:** To download the Analytics charts, hover your mouse over any chart and click the **Camera Icon (📷)** in the top right corner to instantly save it as an image!")
 
 # --- ADMIN: REVIEWER/USER MGMT ---
 elif menu in ["User Management", "Reviewer Management"]:
@@ -605,5 +561,4 @@ elif menu == "My Submissions":
             
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"):
-
                     edit_review_dialog(row)
