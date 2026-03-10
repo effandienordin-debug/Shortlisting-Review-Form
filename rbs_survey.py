@@ -254,44 +254,56 @@ elif menu == "Review Form":
     # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
-    if st.session_state.get('active_review_app'):
+  if st.session_state.get('active_review_app'):
         # --- INDIVIDUAL REVIEW PAGE ---
         name = st.session_state.active_review_app
         app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
         rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), engine, params={"u": st.session_state.username, "a": name})
         prev_resp = json.loads(rev.iloc[0]['responses']) if not rev.empty else None
 
+        # TOP NAVIGATION: Quick Back Button
+        if st.button("⬅️ Back to Gallery", key="top_back"):
+            st.session_state.active_review_app = None
+            st.rerun()
+
         with st.container(border=True):
             col_img, col_txt = st.columns([1, 4])
             with col_img:
                 if app['photo']: 
-                    st.image(bytes(app['photo']), width=150, caption="Passport Size (Click to Zoom)")
+                    st.image(bytes(app['photo']), width=150, caption="Passport Zoom")
             with col_txt:
                 st.subheader(name)
                 st.write(f"**Proposal:** {app['proposal_title']}")
                 st.markdown(f"🔗 [View Documents]({app['info_link']})")
 
         with st.form("eval_form"):
+            # Detailed Mandatory Questions
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
             
-            if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
-                # VALIDATION CHECK: Check if any mandatory Yes/No is None
-                mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
-                incomplete = [c for c in mandatory_codes if res["responses"][c] is None]
-                
-                if incomplete or res["recommendation"] is None:
-                    st.error("⚠️ Please answer all mandatory 'Yes/No' questions (marked with *) before saving.")
-                else:
-                    with engine.begin() as conn:
-                        if not rev.empty:
-                            conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
-                                         {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
-                        else:
-                            conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
-                                         {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
-                    st.toast("Draft Saved Successfully!")
-                    st.session_state.active_review_app = None
-                    st.rerun()
+            # Action Buttons Row
+            if not is_locked:
+                if st.form_submit_button("💾 Save Draft & Return to Gallery", use_container_width=True, type="primary"):
+                    # Validation Logic
+                    mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
+                    if any(res["responses"][c] is None for c in mandatory_codes) or res["recommendation"] is None:
+                        st.error("⚠️ Please answer all mandatory questions marked with *")
+                    else:
+                        with engine.begin() as conn:
+                            if not rev.empty:
+                                conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
+                                             {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
+                            else:
+                                conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
+                                             {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
+                        st.session_state.active_review_app = None
+                        st.rerun()
+            else:
+                st.warning("🔒 This form is locked because you have already submitted your final evaluation.")
+
+        # BOTTOM NAVIGATION: Secondary Back Button
+        if st.button("⬅️ Cancel and Return to Gallery", key="bot_back", use_container_width=True):
+            st.session_state.active_review_app = None
+            st.rerun()
 
     else:
         # --- APPLICANT GALLERY VIEW ---
@@ -366,6 +378,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
