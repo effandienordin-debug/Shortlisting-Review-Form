@@ -15,8 +15,13 @@ def get_applicants_list(_engine):
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
     st.info("""
-    Reviewers can access supporting documents via the 'View Documents' link. 
-    Please refer to **Sheet 1: Summary** before completing this form.
+    The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
+    This shortlisting review form is to evaluate applications based on key criteria.
+    
+    **Instructions:**
+    Reviewers can access the applicants' information and supporting documents via the 'View Documents' Link provided in the applicant detail. 
+    Please refer to **Sheet 1: Summary** (the OneDrive link is provided in the table assigned to your name) before completing this form. 
+    Kindly review all materials thoroughly before making your recommendation.
     """)
     st.divider()
     
