@@ -5,7 +5,18 @@ from sqlalchemy import text
 
 @st.cache_resource(ttl=60)
 def get_analytics_data(_engine):
-    df = pd.read_sql("SELECT reviewer_username, applicant_name, final_recommendation, is_final FROM reviews", _engine)
+    # Updated query: Joins reviews with reviewers to get the Full Name
+    query = """
+        SELECT 
+            r.reviewer_username, 
+            COALESCE(rev.full_name, r.reviewer_username) as reviewer_name,
+            r.applicant_name, 
+            r.final_recommendation, 
+            r.is_final 
+        FROM reviews r
+        LEFT JOIN reviewers rev ON r.reviewer_username = rev.username
+    """
+    df = pd.read_sql(text(query), _engine)
     return df
 
 def render_dashboard(engine):
@@ -29,7 +40,14 @@ def render_dashboard(engine):
             st.plotly_chart(fig2, use_container_width=True)
         
         st.subheader("📋 Master Reviewer Results Table")
-        st.dataframe(df, use_container_width=True)
+        # Rename columns for professional display
+        display_df = df.rename(columns={
+            "reviewer_name": "Reviewer Full Name",
+            "applicant_name": "Applicant",
+            "final_recommendation": "Recommendation",
+            "is_final": "Status (Finalized)"
+        })
+        st.dataframe(display_df[["Reviewer Full Name", "Applicant", "Recommendation", "Status (Finalized)"]], use_container_width=True)
     else: 
         st.info("No data yet.")
 
@@ -51,7 +69,6 @@ def render_management(menu_title, engine, hash_password, delete_item):
                 pw = st.text_input("Password *", type="password")
             
             if st.form_submit_button("Save"):
-                # VALIDATION: Prevent blank entry
                 if table == "applicants":
                     if not n.strip() or not t.strip():
                         st.error("⚠️ Fields cannot be blank.")
@@ -75,7 +92,18 @@ def render_management(menu_title, engine, hash_password, delete_item):
         with st.container(border=True):
             e1, e2, e3 = st.columns([1, 4, 2])
             if table == "applicants" and row['photo']: e1.image(bytes(row['photo']), width=100)
-            e2.write(f"**Name:** {row['name'] if table=='applicants' else row['username']}")
+            
+            # --- NEW DISPLAY LOGIC: Show Full Name ---
+            if table == "applicants":
+                display_name = row['name']
+            else:
+                # Use Full Name if available, otherwise fallback to username
+                display_name = row['full_name'] if row['full_name'] else row['username']
+            
+            e2.write(f"### {display_name}")
+            if table != "applicants":
+                e2.caption(f"🆔 Username: {row['username']}")
+            # -----------------------------------------
             
             with e3.expander("📝 Edit Details"):
                 with st.form(f"edit_{table}_{row['id']}"):
@@ -111,3 +139,4 @@ def render_management(menu_title, engine, hash_password, delete_item):
             if e3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
                 delete_item(table, row['id'])
                 st.cache_resource.clear()
+                st.rerun()
