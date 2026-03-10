@@ -293,10 +293,11 @@ elif menu == "My Submissions":
         for _, row in my_revs.iterrows():
             with st.container(border=True):
                 sub1, sub2 = st.columns([1, 5])
-                if row['photo']: sub1.image(bytes(row['photo']), width=100)
+                if row['photo']: sub1.image(bytes(row['photo']), use_container_width=True)
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
