@@ -4,7 +4,6 @@ bcrypt
 SQLAlchemy
 psycopg2-binary
 plotly
-fpdf
-extra-streamlit-components
-kaleido
+kaleido==0.1.0post1
 reportlab
+extra-streamlit-components
