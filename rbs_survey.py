@@ -119,44 +119,68 @@ elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
 
 elif menu == "Review Form":
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
-    st.info("The RBS Grant supports outstanding researchers. Please refer to Sheet 1: Summary before completing this form.")
-    st.divider()
+    # -- st.title("📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form ") --
+    # --st.subheader(f"Welcome, {st.session_state.full_name}!")--
+    # --- New Instructions Section ---
+    st.info("""
+    The Dr Ranjeet Bhagwan Singh Medical Research Grant (RBS Grant) supports outstanding early-career researchers in Malaysia conducting innovative and impactful medical research. 
+    This shortlisting review form is to evaluate applications based on key criteria.
     
+    **Instructions:**
+    Reviewers can access the applicants' information and supporting documents via the 'View Documents' Link provided in the applicant detail. 
+    Please refer to **Sheet 1: Summary** (the OneDrive link is provided in the table assigned to your name) before completing this form. 
+    Kindly review all materials thoroughly before making your recommendation.
+    """)
+    st.divider()
+    # 2. Modern Avatar Welcome Card
     with st.container(border=True):
-        col_i, col_g = st.columns([1, 10])
-        col_i.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
-        col_g.markdown(f"### Welcome back, {st.session_state.full_name}!")
-        col_g.caption(f"🔬 Logged in as: {st.session_state.username}")
-
+        col_icon, col_greet = st.columns([1, 10])
+        with col_icon:
+            # Using a clean, professional researcher/medical avatar icon
+            st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
+        with col_greet:
+            st.markdown(f"### Welcome back, {st.session_state.full_name}!")
+            st.caption(f"🔬 Logged in as: {st.session_state.username} | Role: Reviewer")
+            # -- st.markdown("🔬 *You are authorized to evaluate early-career medical research applications.*") --
+    # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
-        # --- Form View ---
+        # --- INDIVIDUAL REVIEW PAGE ---
         name = st.session_state.active_review_app
         app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
         rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), engine, params={"u": st.session_state.username, "a": name})
         prev_resp = json.loads(rev.iloc[0]['responses']) if not rev.empty else None
 
+        with st.container(border=True):
+            col_img, col_txt = st.columns([1, 4])
+            with col_img:
+                if app['photo']: 
+                    st.image(bytes(app['photo']), width=150, caption="Passport Size (Click to Zoom)")
+            with col_txt:
+                st.subheader(name)
+                st.write(f"**Proposal:** {app['proposal_title']}")
+                st.markdown(f"🔗 [View Documents]({app['info_link']})")
+
         with st.form("eval_form"):
+            # Uses your strict 4-section question engine
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
+            
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
-                mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
-                if any(res["responses"].get(c) is None for c in mandatory_codes) or res["recommendation"] is None:
-                    st.error("⚠️ Please answer all mandatory questions marked with *")
-                else:
-                    with engine.begin() as conn:
-                        if not rev.empty:
-                            conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
-                                         {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
-                        else:
-                            conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
-                                         {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
-                    st.session_state.active_review_app = None
-                    st.rerun()
-                    
-        if st.button("⬅️ Back to Gallery"):
+                with engine.begin() as conn:
+                    if not rev.empty:
+                        conn.execute(text("UPDATE reviews SET responses=:r, final_recommendation=:fr, overall_justification=:oj, updated_at=:t WHERE id=:id"), 
+                                     {"r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time(), "id":int(rev.iloc[0]['id'])})
+                    else:
+                        conn.execute(text("INSERT INTO reviews (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at) VALUES (:u, :a, :r, :fr, :oj, :t, :t)"), 
+                                     {"u":st.session_state.username, "a":name, "r":json.dumps(res["responses"]), "fr":res["recommendation"], "oj":res["justification"], "t":get_malaysia_time()})
+                st.session_state.active_review_app = None
+                st.rerun()
+        
+        if st.button("⬅️ Back to Gallery", use_container_width=True):
             st.session_state.active_review_app = None
             st.rerun()
+
     else:
         # --- Gallery View ---
         apps = pd.read_sql("SELECT * FROM applicants", engine)
@@ -200,3 +224,4 @@ elif menu == "My Submissions":
                 s2.write(f"### {row['applicant_name']}")
                 s2.write(f"**Recommendation:** {row['final_recommendation']}")
                 s2.info(f"**Justification:** {row['overall_justification']}")
+
