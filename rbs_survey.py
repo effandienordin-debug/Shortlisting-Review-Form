@@ -211,7 +211,7 @@ if 'menu_choice' not in st.session_state:
 
 # --- LOGIN ---
 if not st.session_state.authenticated:
-    st.title("🔐 RBS Medical Grant Login")
+    st.title("🔐 RBS Medical Grant LoDr Ranjeet Bhagwan Singh Medical Research Grant: Shortlisting Review Form")
     with st.form("login"):
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
@@ -562,3 +562,4 @@ elif menu == "My Submissions":
             with m4:
                 if st.button("✏️ Edit", key=f"h_{row['id']}"):
                     edit_review_dialog(row)
+
