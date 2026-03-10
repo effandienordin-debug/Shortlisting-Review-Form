@@ -60,8 +60,12 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             st.rerun()
     else:
         # --- GALLERY VIEW ---
-        apps = get_applicants_list(engine)
+       apps = get_applicants_list(engine)
+        
+        # Fetch existing reviews to show Recommendation and Justification on the card
         rev_records = pd.read_sql(text("SELECT applicant_name, final_recommendation, overall_justification FROM reviews WHERE reviewer_username = :u"), engine, params={"u": st.session_state.username})
+        
+        # Create a lookup dictionary for quick access
         reviews_lookup = rev_records.set_index('applicant_name').to_dict('index')
         
         st.subheader("Applicant Gallery")
@@ -72,14 +76,33 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                     row = apps.iloc[i+j]
                     with cols[j]:
                         with st.container(border=True):
-                            if row['photo']: st.image(bytes(row['photo']), use_container_width=True)
+                            # Passport Photo Handling
+                            if row['photo']: 
+                                st.image(bytes(row['photo']), use_container_width=True)
+                            else: 
+                                st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", use_container_width=True)
+                            
                             st.write(f"**{row['name']}**")
+                            
+                            # Show Status, Recommendation, and Last Justification
                             if row['name'] in reviews_lookup:
-                                st.success(f"✅ Saved")
-                            if st.button("Review", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
+                                rev_data = reviews_lookup[row['name']]
+                                rec = rev_data['final_recommendation']
+                                color = "green" if rec == "Yes" else "red"
+                                
+                                st.markdown(f"**Status:** :green[✅ Saved]")
+                                st.markdown(f"**Final Recommendation:** :{color}[{rec}]")
+                                
+                                # Show snippet of the last justification (Limited to 80 chars for clean UI)
+                                justification = rev_data['overall_justification'] or "No text provided."
+                                st.caption(f"💬 **Justification:** {justification[:80]}{'...' if len(justification) > 80 else ''}")
+                            else:
+                                st.markdown("**Status:** :orange[⏳ Awaiting Review]")
+                                st.caption("No justification saved yet.")
+                            
+                            if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                 st.session_state.active_review_app = row['name']
                                 st.rerun()
-
         if not is_locked and len(reviews_lookup) >= len(apps) > 0:
             if st.button("🚀 FINAL SUBMIT ALL", type="primary", use_container_width=True):
                 with engine.begin() as conn:
