@@ -4,6 +4,6 @@ bcrypt
 SQLAlchemy
 psycopg2-binary
 plotly
-kaleido==0.1.0post1
-reportlab
+selenium
+webdriver-manager
 extra-streamlit-components
