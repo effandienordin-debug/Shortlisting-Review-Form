@@ -207,8 +207,8 @@ elif menu == "Review Form":
             st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
         with col_greet:
             st.markdown(f"### Welcome back, {st.session_state.full_name}!")
-            st.caption(f"Logged in as: {st.session_state.username} | Role: Grant Reviewer")
-            st.markdown("🔬 *You are authorized to evaluate early-career medical research applications.*")
+            st.caption(f"🔬 Logged in as: {st.session_state.username} | Role: Reviewer")
+            # -- st.markdown("🔬 *You are authorized to evaluate early-career medical research applications.*") --
     # Check if the reviewer has already finalized their entire batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
@@ -321,6 +321,7 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Final Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Final justification:** {row['overall_justification']}")
+
 
 
 
