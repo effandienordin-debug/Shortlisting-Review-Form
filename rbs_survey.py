@@ -253,7 +253,7 @@ elif menu == "Review Form":
                                 rec = rev_data['final_recommendation']
                                 color = "green" if rec == "Yes" else "red"
                                 
-                                st.markdown(f"**Status:** :inner[✅ Saved]")
+                                st.markdown(f"**Status:** :green[✅ Saved]")
                                 st.markdown(f"**Rec:** :{color}[{rec}]")
                                 
                                 # Show snippet of the last justification
@@ -297,4 +297,5 @@ elif menu == "My Submissions":
                 sub2.write(f"### {row['applicant_name']}")
                 sub2.write(f"**Recommendation:** {row['final_recommendation']}")
                 sub2.info(f"**Justification:** {row['overall_justification']}")
+
 
