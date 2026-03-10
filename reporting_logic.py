@@ -3,9 +3,6 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import text
 import io
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import ImageReader
 
 @st.cache_resource(ttl=60)
 def get_report_data(_engine):
@@ -21,36 +18,6 @@ def get_report_data(_engine):
     """
     return pd.read_sql(text(query), _engine)
 
-def generate_pdf_report(df, figs):
-    """Converts Plotly figures to static images and builds a PDF."""
-    buffer = io.BytesIO()
-    p = canvas.Canvas(buffer, pagesize=letter)
-    w, h = letter
-
-    # --- PDF Header ---
-    p.setFont("Helvetica-Bold", 18)
-    p.drawString(50, h - 50, "RBS Medical Grant: Summary Report")
-    p.setFont("Helvetica", 10)
-    p.drawString(50, h - 70, f"Total Applications Reviewed: {len(df)}")
-    
-    # --- Embed Graphs ---
-    # We use kaleido (engine) to convert plotly to static PNG for the PDF
-    curr_h = h - 350
-    for i, fig in enumerate(figs):
-        # Convert Plotly to PNG bytes
-        img_bytes = fig.to_image(format="png", width=600, height=300)
-        img_reader = ImageReader(io.BytesIO(img_bytes))
-        
-        p.drawImage(img_reader, 50, curr_h, width=500, height=250)
-        curr_h -= 300
-        
-        if curr_h < 100 and i < len(figs)-1:
-            p.showPage()
-            curr_h = h - 300
-
-    p.save()
-    return buffer.getvalue()
-
 def render_reporting(engine):
     st.header("📄 Grant Reporting Center")
     df = get_report_data(engine)
@@ -59,7 +26,7 @@ def render_reporting(engine):
         st.info("No data available yet.")
         return
 
-    # Filter Sidebar/Expander
+    # --- 1. FILTER SECTION ---
     with st.expander("🔍 Filter Results"):
         c1, c2 = st.columns(2)
         f_rec = c1.multiselect("Recommendation", df['final_recommendation'].unique(), default=df['final_recommendation'].unique())
@@ -67,7 +34,7 @@ def render_reporting(engine):
     
     filtered_df = df[(df['final_recommendation'].isin(f_rec)) & (df['reviewer_name'].isin(f_rev))]
 
-    # Graphs
+    # --- 2. VISUALS (Graphs) ---
     fig1 = px.pie(filtered_df, names='final_recommendation', title="Overall Recommendation Split")
     fig2 = px.bar(filtered_df.groupby(['applicant_name', 'final_recommendation']).size().reset_index(name='count'), 
                   x='applicant_name', y='count', color='final_recommendation', title="Applicant Breakdown")
@@ -76,29 +43,33 @@ def render_reporting(engine):
     col1.plotly_chart(fig1, use_container_width=True)
     col2.plotly_chart(fig2, use_container_width=True)
 
-    # Export Actions
+    # --- 3. EXPORT ACTIONS ---
     st.divider()
-    btn_col1, btn_col2 = st.columns(2)
+    st.subheader("📥 Export Options")
+    
+    btn_col1, btn_col2, btn_col3 = st.columns(3)
 
-    try:
-        pdf_data = generate_pdf_report(filtered_df, [fig1, fig2])
-        btn_col1.download_button(
-            "📥 Download Graphs as PDF",
-            data=pdf_data,
-            file_name="RBS_Grant_Visual_Report.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-    except Exception as e:
-        btn_col1.warning("PDF Engine (Kaleido) not found. Standard PDF export disabled.")
+    # Browser Print Method (No Kaleido Required)
+    if btn_col1.button("🖨️ Print to PDF (Browser)", use_container_width=True):
+        st.components.v1.html("""
+            <script>
+                window.print();
+            </script>
+        """, height=0)
+        st.info("💡 Hint: Select 'Save as PDF' in the print destination.")
 
+    # CSV Export (Standard)
     btn_col2.download_button(
-        "📊 Download Data as CSV",
+        "📊 Download Data (CSV)",
         data=filtered_df.to_csv(index=False),
         file_name="RBS_Data_Export.csv",
         mime="text/csv",
         use_container_width=True
     )
+    
+    # Optional: Display CSV Info
+    btn_col3.info("CSV contains raw filtered data.")
 
+    # --- 4. DATA PREVIEW ---
     st.subheader("📋 Data Preview")
     st.dataframe(filtered_df, use_container_width=True)
