@@ -109,7 +109,7 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                                 st.markdown(f"**Recommendation:** :{color}[{rec}]")
                                 
                                 justification = r_data['overall_justification'] or "No text provided."
-                                st.caption(f"💬 {justification[:80]}...")
+                                st.caption(f"💬 Final Justification {justification[:80]}...")
                             else:
                                 st.markdown("**Status:** :orange[⏳ Awaiting Review]")
                                 st.caption("No justification saved yet.")
