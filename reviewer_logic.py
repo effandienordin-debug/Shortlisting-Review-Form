@@ -106,13 +106,13 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                                 color = "green" if rec == "Yes" else "red"
                                 
                                 st.markdown(f"**Status:** :green[✅ Saved]")
-                                st.markdown(f"**Recommendation:** :{color}[{rec}]")
+                                st.markdown(f"**Final Recommendation:** :{color}[{rec}]")
                                 
                                 justification = r_data['overall_justification'] or "No text provided."
                                 st.caption(f"**💬Final Justification:** {justification[:80]}...")
                             else:
                                 st.markdown("**Status:** :orange[⏳ Awaiting Review]")
-                                st.caption("No justification saved yet.")
+                                st.caption("No final justification saved yet.")
                             
                             if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                 st.session_state.active_review_app = row['name']
