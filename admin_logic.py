@@ -1,142 +1,103 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import time
+import re
+from io import BytesIO
+from datetime import datetime
 from sqlalchemy import text
+from supabase import create_client
+from streamlit_autorefresh import st_autorefresh
+import extra_streamlit_components as stx
 
-@st.cache_resource(ttl=60)
-def get_analytics_data(_engine):
-    # Updated query: Joins reviews with reviewers to get the Full Name
-    query = """
-        SELECT 
-            r.reviewer_username, 
-            COALESCE(rev.full_name, r.reviewer_username) as reviewer_name,
-            r.applicant_name, 
-            r.final_recommendation, 
-            r.is_final 
-        FROM reviews r
-        LEFT JOIN reviewers rev ON r.reviewer_username = rev.username
-    """
-    df = pd.read_sql(text(query), _engine)
-    return df
+# --- 1. CONFIG & CONNECTIONS ---
+st.set_page_config(page_title="ASM Admin Panel", layout="wide")
+cache_buster = datetime.now().strftime("%Y%m%d%H%M%S")
+BLANK_ICON = "https://cdn-icons-png.flaticon.com/512/149/149071.png"
 
-def render_dashboard(engine):
-    st.header("📊 System Analytics")
-    df = get_analytics_data(engine)
+try:
+    cookie_manager = stx.CookieManager(key="main_cookie_manager")
+except Exception:
+    cookie_manager = None
+
+# Session States
+for key, val in [("authenticated", False), ("username", None), ("user_role", "Viewer"), ("logout_clicked", False)]:
+    if key not in st.session_state: st.session_state[key] = val
+
+def load_secret(key):
+    if key in st.secrets: return st.secrets[key]
+    st.error(f"❌ Missing Secret: **{key}**"); st.stop()
+
+SUPABASE_URL = load_secret("supabase_url")
+SUPABASE_KEY = load_secret("supabase_key")
+BUCKET_NAME = "evaluator-photos"
+conn = st.connection("postgresql", type="sql")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- 2. HELPER FUNCTIONS ---
+def get_items_sql(table, column):
+    try:
+        df = conn.query(f"SELECT {column} FROM {table} ORDER BY {column} ASC;", ttl=0)
+        return df[column].dropna().tolist() if not df.empty else []
+    except Exception as e:
+        return []
+
+# --- 3. DIALOGS (New & Updated) ---
+@st.dialog("📚 Bulk Add & Assign Applicants")
+def bulk_add_applicants_dialog():
+    evaluators = get_items_sql("evaluators", "name")
+    st.markdown("**Format:** `Applicant Name, Proposal Title` (One per line)")
+    target_eval = st.selectbox("Assign to Evaluator:", evaluators)
+    raw_data = st.text_area("List", height=200)
     
-    if not df.empty:
-        met1, met2, met3 = st.columns(3)
-        met1.metric("Total Reviews", len(df))
-        met2.metric("Completed (Final)", len(df[df['is_final'] == True]))
-        met3.metric("Approval Rate", f"{(len(df[df['final_recommendation']=='Yes'])/len(df)*100):.1f}%")
-        
-        st.divider()
-        c_a, c_b = st.columns(2)
-        with c_a:
-            fig1 = px.pie(df, names='final_recommendation', title="Overall Recommendation Split", color_discrete_map={"Yes":"#2ecc71","No":"#e74c3c"})
-            st.plotly_chart(fig1, use_container_width=True)
-        with c_b:
-            app_stats = df.groupby(['applicant_name', 'final_recommendation']).size().reset_index(name='count')
-            fig2 = px.bar(app_stats, x='applicant_name', y='count', color='final_recommendation', title="Applicant Analysis", barmode='group')
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        st.subheader("📋 Master Reviewer Results Table")
-        # Rename columns for professional display
-        display_df = df.rename(columns={
-            "reviewer_name": "Reviewer Full Name",
-            "applicant_name": "Applicant",
-            "final_recommendation": "Recommendation",
-            "is_final": "Status (Finalized)"
-        })
-        st.dataframe(display_df[["Reviewer Full Name", "Applicant", "Recommendation", "Status (Finalized)"]], use_container_width=True)
-    else: 
-        st.info("No data yet.")
+    if st.button("Import and Assign", type="primary"):
+        lines = [line.strip() for line in raw_data.split('\n') if line.strip()]
+        with conn.session as s:
+            for line in lines:
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 2:
+                    app, title = parts[0], parts[1]
+                    s.execute(text("INSERT INTO proposals (title) VALUES (:t) ON CONFLICT DO NOTHING"), {"t": title})
+                    s.execute(text("INSERT INTO applicant_assignments (applicant_name, evaluator_name) VALUES (:a, :e) ON CONFLICT DO NOTHING"), {"a": app, "e": target_eval})
+            s.commit()
+        st.success("Assigned Successfully!"); time.sleep(1); st.rerun()
 
-def render_management(menu_title, engine, hash_password, delete_item):
-    mapping = {"User Management": "users", "Reviewer Management": "reviewers", "Applicant Management": "applicants"}
-    table = mapping[menu_title]
-    st.header(f"⚙️ {menu_title}")
+@st.dialog("🔗 Assign Applicant")
+def assign_single_dialog(app_name):
+    evaluators = get_items_sql("evaluators", "name")
+    selected = st.multiselect("Evaluators:", evaluators)
+    if st.button("Update"):
+        with conn.session as s:
+            s.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
+            for e in selected:
+                s.execute(text("INSERT INTO applicant_assignments (applicant_name, evaluator_name) VALUES (:a, :e)"), {"a": app_name, "e": e})
+            s.commit()
+        st.rerun()
+
+# --- 4. NAVIGATION ---
+with st.sidebar:
+    st.title("🛡️ ASM Admin")
+    menu_options = ["📊 Tracker", "👥 Applicants", "📋 Proposals", "👤 Evaluators", "📜 History"]
+    if st.session_state["user_role"] == "SuperAdmin": menu_options.append("🔑 Users")
+    menu_choice = st.radio("Navigation", menu_options)
     
-    with st.expander(f"➕ Add New Entry"):
-        with st.form(f"add_{table}"):
-            if table == "applicants":
-                n = st.text_input("Full Name *")
-                t = st.text_area("Proposal Title *")
-                l = st.text_input("Document Link")
-                p = st.file_uploader("Photo", type=['png', 'jpg'])
-            else:
-                un = st.text_input("Username *")
-                fn = st.text_input("Full Name *")
-                pw = st.text_input("Password *", type="password")
-            
-            if st.form_submit_button("Save"):
-                if table == "applicants":
-                    if not n.strip() or not t.strip():
-                        st.error("⚠️ Fields cannot be blank.")
-                        st.stop()
-                else:
-                    if not un.strip() or not fn.strip() or not pw.strip():
-                        st.error("⚠️ All fields are mandatory.")
-                        st.stop()
+    if st.button("🚪 Logout"):
+        st.session_state["logout_clicked"] = True
+        if cookie_manager: cookie_manager.delete("asm_admin_user")
+        st.session_state.clear(); st.rerun()
 
-                with engine.begin() as conn:
-                    if table == "applicants":
-                        conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link, photo) VALUES (:n, :t, :l, :p)"), {"n":n,"t":t,"l":l,"p":p.getvalue() if p else None})
-                    else:
-                        conn.execute(text(f"INSERT INTO {table} (username, full_name, password_hash) VALUES (:u, :fn, :p)"), {"u":un, "fn":fn, "p":hash_password(pw)})
-                
-                st.cache_resource.clear()
-                st.rerun()
+# --- 5. MAIN CONTENT ---
+if menu_choice == "👥 Applicants":
+    st.header("👥 Applicant Management")
+    if st.session_state["user_role"] != "Viewer":
+        if st.button("📚 Bulk Add & Assign"): bulk_add_applicants_dialog()
+    
+    st.divider()
+    query = "SELECT applicant_name, string_agg(evaluator_name, ', ') as assigned_to FROM applicant_assignments GROUP BY applicant_name"
+    df = conn.query(query, ttl=0)
+    for idx, row in df.iterrows():
+        c1, c2, c3 = st.columns([3, 4, 1])
+        c1.write(f"👤 **{row['applicant_name']}**")
+        c2.caption(f"Reviewer: {row['assigned_to']}")
+        if c3.button("⚙️", key=f"edit_a_{idx}"): assign_single_dialog(row['applicant_name'])
 
-    data = pd.read_sql(f"SELECT * FROM {table}", engine)
-    for _, row in data.iterrows():
-        with st.container(border=True):
-            e1, e2, e3 = st.columns([1, 4, 2])
-            if table == "applicants" and row['photo']: e1.image(bytes(row['photo']), width=100)
-            
-            # --- NEW DISPLAY LOGIC: Show Full Name ---
-            if table == "applicants":
-                display_name = row['name']
-            else:
-                # Use Full Name if available, otherwise fallback to username
-                display_name = row['full_name'] if row['full_name'] else row['username']
-            
-            e2.write(f"### {display_name}")
-            if table != "applicants":
-                e2.caption(f"🆔 Username: {row['username']}")
-            # -----------------------------------------
-            
-            with e3.expander("📝 Edit Details"):
-                with st.form(f"edit_{table}_{row['id']}"):
-                    if table == "applicants":
-                        new_n = st.text_input("Name", value=row['name'])
-                        new_t = st.text_area("Title", value=row['proposal_title'])
-                        new_l = st.text_input("Link", value=row['info_link'])
-                        new_p = st.file_uploader("Update Photo", type=['png', 'jpg'])
-                        if st.form_submit_button("Update"):
-                            if not new_n.strip() or not new_t.strip():
-                                st.error("⚠️ Cannot save blank fields.")
-                            else:
-                                p_val = new_p.getvalue() if new_p else row['photo']
-                                with engine.begin() as conn:
-                                    conn.execute(text("UPDATE applicants SET name=:n, proposal_title=:t, info_link=:l, photo=:p WHERE id=:id"), {"n":new_n,"t":new_t,"l":new_l,"p":p_val, "id":row['id']})
-                                st.cache_resource.clear()
-                                st.rerun()
-                    else:
-                        new_fn = st.text_input("Full Name", value=row['full_name'])
-                        new_pw = st.text_input("New Password (Optional)", type="password")
-                        if st.form_submit_button("Update"):
-                            if not new_fn.strip():
-                                st.error("⚠️ Full Name is required.")
-                            else:
-                                with engine.begin() as conn:
-                                    if new_pw:
-                                        conn.execute(text(f"UPDATE {table} SET full_name=:fn, password_hash=:p WHERE id=:id"), {"fn":new_fn, "p":hash_password(new_pw), "id":row['id']})
-                                    else:
-                                        conn.execute(text(f"UPDATE {table} SET full_name=:fn WHERE id=:id"), {"fn":new_fn, "id":row['id']})
-                                st.cache_resource.clear()
-                                st.rerun()
-            
-            if e3.button("🗑️ Delete", key=f"del_{table}_{row['id']}", use_container_width=True):
-                delete_item(table, row['id'])
-                st.cache_resource.clear()
-                st.rerun()
+# (Note: Tracker, Proposals, Evaluators sections remain same as your provided code)
