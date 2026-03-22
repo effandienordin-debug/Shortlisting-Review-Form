@@ -15,6 +15,7 @@ def get_assigned_applicants(_engine, username):
     df = pd.read_sql(query, _engine, params={"u": username})
     return df
 
+# --- 2. RENDER REVIEW FORM & GALLERY ---
 def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     st.markdown("## 📋 Dr Ranjeet Bhagwan Singh Medical Research Grant: Review Form")
     st.info("""
@@ -28,7 +29,7 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     """)
     st.divider()
     
-    # 2. Welcome Card
+    # Welcome Card
     with st.container(border=True):
         col_icon, col_greet = st.columns([1, 10])
         col_icon.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
@@ -81,7 +82,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             st.rerun()
     else:
         # --- GALLERY VIEW ---
-        # --> Updated to pull ONLY assigned applicants <--
         apps = get_assigned_applicants(engine, st.session_state.username)
         
         if apps.empty:
@@ -131,18 +131,3 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                         conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
                     st.cache_resource.clear()
                     st.balloons(); st.rerun()
-
-def render_submissions(engine):
-    st.header("📋 Your Saved Submissions")
-    my_revs = pd.read_sql(text("SELECT r.*, a.photo FROM reviews r JOIN applicants a ON r.applicant_name = a.name WHERE r.reviewer_username = :u"), 
-                          engine, params={"u": st.session_state.username})
-    if my_revs.empty:
-        st.info("No submissions found.")
-    else:
-        for _, row in my_revs.iterrows():
-            with st.container(border=True):
-                s1, s2 = st.columns([1, 5])
-                if row['photo']: s1.image(bytes(row['photo']), use_container_width=True)
-                s2.subheader(row['applicant_name'])
-                s2.write(f"**Recommendation:** {row['final_recommendation']}")
-                s2.info(f"**Justification:** {row['overall_justification']}")
