@@ -53,6 +53,16 @@ def init_db():
                 submitted_at TIMESTAMP, updated_at TIMESTAMP, is_final BOOLEAN DEFAULT FALSE
             )
         """))
+        # ---> NEW TABLE: APPLICANT ASSIGNMENTS <---
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS applicant_assignments (
+                id SERIAL PRIMARY KEY,
+                applicant_name VARCHAR(255),
+                reviewer_username VARCHAR(255),
+                UNIQUE(applicant_name, reviewer_username)
+            )
+        """))
+        
         res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0]
         if res == 0:
             conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES ('admin', 'Master Admin', 'Admin', :pw)"), 
