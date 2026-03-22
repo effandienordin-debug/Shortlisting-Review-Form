@@ -17,7 +17,8 @@ def get_local_image_base64(username):
             return f"data:image/png;base64,{b64}"
     return "https://cdn-icons-png.flaticon.com/512/149/149071.png"
 
-# --- 1. DIALOGS FOR BULK ADDING ---
+# --- 1. DIALOGS FOR BULK ADDING & EDITING ---
+
 @st.dialog("📚 Bulk Add Applicants")
 def bulk_add_applicants_dialog(engine):
     st.markdown("**Format:** `Applicant Name, Proposal Title, Info Link (Optional)` (One per line)")
@@ -65,6 +66,76 @@ def bulk_add_reviewers_dialog(engine, hash_password):
         time.sleep(1)
         st.rerun()
 
+@st.dialog("✏️ Edit Applicant Details")
+def edit_applicant_dialog(app_id, old_name, old_title, old_link, engine):
+    new_name = st.text_input("Applicant Name*", value=old_name)
+    new_title = st.text_input("Proposal Title*", value=old_title)
+    new_link = st.text_input("OneDrive/Info Link", value=old_link if old_link else "")
+    new_photo = st.file_uploader("Upload New Photo (Leave blank to keep current)", type=['png', 'jpg'])
+    
+    if st.button("Save Changes", type="primary"):
+        if new_name and new_title:
+            with engine.begin() as conn:
+                # If name changed, cascade update to assignments and reviews to prevent orphans
+                if new_name != old_name:
+                    conn.execute(text("UPDATE applicant_assignments SET applicant_name = :new WHERE applicant_name = :old"), {"new": new_name, "old": old_name})
+                    conn.execute(text("UPDATE reviews SET applicant_name = :new WHERE applicant_name = :old"), {"new": new_name, "old": old_name})
+                
+                # Update applicant data
+                if new_photo:
+                    conn.execute(text("UPDATE applicants SET name = :n, proposal_title = :t, info_link = :l, photo = :p WHERE id = :id"), 
+                                 {"n": new_name.strip(), "t": new_title.strip(), "l": new_link, "p": new_photo.getvalue(), "id": app_id})
+                else:
+                    conn.execute(text("UPDATE applicants SET name = :n, proposal_title = :t, info_link = :l WHERE id = :id"), 
+                                 {"n": new_name.strip(), "t": new_title.strip(), "l": new_link, "id": app_id})
+            
+            st.success("✅ Applicant Updated!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("🚨 Name and Title are required.")
+
+@st.dialog("✏️ Edit Reviewer Details")
+def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
+    new_name = st.text_input("Full Name*", value=old_name)
+    new_user = st.text_input("Username (Email/Staff ID)*", value=old_user)
+    new_pass = st.text_input("New Password (Leave blank to keep current)", type="password")
+    new_photo = st.file_uploader("Upload New Photo (Leave blank to keep current)", type=['png', 'jpg'])
+    
+    if st.button("Save Changes", type="primary"):
+        if new_name and new_user:
+            with engine.begin() as conn:
+                # If username changed, cascade update to assignments and reviews
+                if new_user != old_user:
+                    conn.execute(text("UPDATE applicant_assignments SET reviewer_username = :new WHERE reviewer_username = :old"), {"new": new_user, "old": old_user})
+                    conn.execute(text("UPDATE reviews SET reviewer_username = :new WHERE reviewer_username = :old"), {"new": new_user, "old": old_user})
+                
+                # Update Reviewer data
+                if new_pass:
+                    conn.execute(text("UPDATE reviewers SET full_name = :n, username = :u, password_hash = :p WHERE id = :id"),
+                                 {"n": new_name.strip(), "u": new_user.strip(), "p": hash_password(new_pass), "id": rev_id})
+                else:
+                    conn.execute(text("UPDATE reviewers SET full_name = :n, username = :u WHERE id = :id"),
+                                 {"n": new_name.strip(), "u": new_user.strip(), "id": rev_id})
+            
+            # Handle local photo changes
+            if new_photo:
+                save_path = os.path.join(PHOTO_DIR, f"{new_user.strip().replace(' ', '_')}.png")
+                with open(save_path, "wb") as f:
+                    f.write(new_photo.getvalue())
+            elif new_user != old_user:
+                # Rename the existing photo file if the username was changed
+                old_path = os.path.join(PHOTO_DIR, f"{old_user.strip().replace(' ', '_')}.png")
+                new_path = os.path.join(PHOTO_DIR, f"{new_user.strip().replace(' ', '_')}.png")
+                if os.path.exists(old_path):
+                    os.rename(old_path, new_path)
+
+            st.success("✅ Reviewer Updated!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("🚨 Full Name and Username are required.")
+
 # --- 2. RENDER DASHBOARD (TRACKER) ---
 def render_dashboard(engine):
     st.header("📊 Live Evaluation Tracker")
@@ -87,7 +158,6 @@ def render_dashboard(engine):
         u_name = row['username']
         f_name = row['full_name']
         
-        # Calculate based on assignments
         assigned_count = len(assign_df[assign_df['reviewer_username'] == u_name])
         done_count = len(reviews_df[(reviews_df['reviewer_username'] == u_name)])
         is_done = (done_count >= assigned_count) and assigned_count > 0
@@ -111,7 +181,6 @@ def render_management(menu, engine, hash_password, delete_item):
     if menu == "Applicant Management":
         st.header("📋 Manage Proposals & Applicants")
         
-        # Bulk Add Button
         if st.button("📚 Bulk Add Applicants"):
             bulk_add_applicants_dialog(engine)
             
@@ -134,7 +203,7 @@ def render_management(menu, engine, hash_password, delete_item):
                         st.error("🚨 Name and Title are required.")
         
         st.divider()
-        st.subheader("🔗 Assign Reviewers to Applicants")
+        st.subheader("🔗 Assign & Manage Applicants")
         
         apps_df = pd.read_sql("SELECT id, name, proposal_title, info_link FROM applicants ORDER BY id ASC", engine)
         revs_df = pd.read_sql("SELECT username, full_name FROM reviewers", engine)
@@ -151,15 +220,13 @@ def render_management(menu, engine, hash_password, delete_item):
             app_name = row['name']
             
             with st.container(border=True):
-                c1, c2, c3 = st.columns([4, 3, 1])
+                c1, c2, c3 = st.columns([4, 3, 2])
                 c1.write(f"**{app_name}**")
                 c1.caption(f"Proposal: {row['proposal_title']}")
                 
-                # Get current assignments
                 current_assigned = assign_df[assign_df['applicant_name'] == app_name]['reviewer_username'].tolist()
                 current_assigned = [r for r in current_assigned if r in reviewer_options]
                 
-                # Assign Interface
                 selected_revs = c2.multiselect(
                     "Assigned Reviewers:", 
                     options=reviewer_options, 
@@ -178,7 +245,13 @@ def render_management(menu, engine, hash_password, delete_item):
                     time.sleep(1)
                     st.rerun()
                 
-                if c3.button("🗑️ Delete Applicant", key=f"del_app_{row['id']}"):
+                # Edit and Delete Buttons
+                c3.write("") # Spacing 
+                c3_1, c3_2 = c3.columns(2)
+                if c3_1.button("✏️ Edit", key=f"edit_app_{row['id']}"):
+                    edit_applicant_dialog(row['id'], app_name, row['proposal_title'], row['info_link'], engine)
+                
+                if c3_2.button("🗑️ Delete", key=f"del_app_{row['id']}"):
                     with engine.begin() as conn:
                         conn.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
                     delete_item("applicants", row['id'])
@@ -186,7 +259,6 @@ def render_management(menu, engine, hash_password, delete_item):
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
         
-        # Bulk Add Button
         if st.button("📚 Bulk Add Reviewers"):
             bulk_add_reviewers_dialog(engine, hash_password)
             
@@ -214,14 +286,20 @@ def render_management(menu, engine, hash_password, delete_item):
         st.divider()
         df = pd.read_sql("SELECT id, username, full_name FROM reviewers ORDER BY id ASC", engine)
         for idx, row in df.iterrows():
-            c1, c2, c3, c4 = st.columns([1, 4, 1, 1])
+            c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 1])
             img_data_uri = get_local_image_base64(row['username'])
             c1.markdown(f"<img src='{img_data_uri}' width='40' height='40' style='border-radius:50%; object-fit:cover;'>", unsafe_allow_html=True)
             with c2:
                 st.write(f"**{row['full_name']}**")
                 st.caption(f"Username: {row['username']}")
+            
             c3.write("`********`") 
-            if c4.button("🗑️", key=f"del_rev_{row['id']}"):
+            
+            # Edit and Delete buttons for reviewers
+            if c4.button("✏️", key=f"edit_rev_{row['id']}"):
+                edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
+                
+            if c5.button("🗑️", key=f"del_rev_{row['id']}"):
                 delete_item("reviewers", row['id'])
 
     elif menu == "User Management":
