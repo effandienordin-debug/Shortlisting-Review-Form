@@ -17,7 +17,55 @@ def get_local_image_base64(username):
             return f"data:image/png;base64,{b64}"
     return "https://cdn-icons-png.flaticon.com/512/149/149071.png"
 
-# --- 1. RENDER DASHBOARD (TRACKER) ---
+# --- 1. DIALOGS FOR BULK ADDING ---
+@st.dialog("📚 Bulk Add Applicants")
+def bulk_add_applicants_dialog(engine):
+    st.markdown("**Format:** `Applicant Name, Proposal Title, Info Link (Optional)` (One per line)")
+    raw_data = st.text_area("Paste Applicant List Here", height=200, placeholder="Ali bin Abu, AI Research Proposal, https://onedrive.link...\nSiti Nur, BioTech Study,")
+    
+    if st.button("Import Applicants", type="primary"):
+        if not raw_data.strip():
+            st.error("🚨 Please paste data first.")
+            return
+        lines = [line.strip() for line in raw_data.split('\n') if line.strip()]
+        count = 0
+        with engine.begin() as conn:
+            for line in lines:
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 2:
+                    app, title = parts[0], parts[1]
+                    link = parts[2] if len(parts) > 2 else None
+                    conn.execute(text("INSERT INTO applicants (name, proposal_title, info_link) VALUES (:n, :t, :l) ON CONFLICT DO NOTHING"), 
+                                 {"n": app, "t": title, "l": link})
+                    count += 1
+        st.success(f"✅ Successfully imported {count} applicants!")
+        time.sleep(1)
+        st.rerun()
+
+@st.dialog("📚 Bulk Add Reviewers")
+def bulk_add_reviewers_dialog(engine, hash_password):
+    st.markdown("**Format:** `Full Name, Username, Password` (One per line)")
+    raw_data = st.text_area("Paste Reviewer List Here", height=200, placeholder="Dr. Rahmat, rahmat.d, Secur3P@ss!\nProf. Lim, lim.cs, 12345678")
+    
+    if st.button("Import Reviewers", type="primary"):
+        if not raw_data.strip():
+            st.error("🚨 Please paste data first.")
+            return
+        lines = [line.strip() for line in raw_data.split('\n') if line.strip()]
+        count = 0
+        with engine.begin() as conn:
+            for line in lines:
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 3:
+                    name, user, pwd = parts[0], parts[1], parts[2]
+                    conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :n, :p) ON CONFLICT DO NOTHING"), 
+                                 {"u": user.strip(), "n": name.strip(), "p": hash_password(pwd.strip())})
+                    count += 1
+        st.success(f"✅ Successfully imported {count} reviewers!")
+        time.sleep(1)
+        st.rerun()
+
+# --- 2. RENDER DASHBOARD (TRACKER) ---
 def render_dashboard(engine):
     st.header("📊 Live Evaluation Tracker")
     
@@ -57,12 +105,16 @@ def render_dashboard(engine):
                 </div>
             """, unsafe_allow_html=True)
 
-# --- 2. RENDER MANAGEMENT MENUS ---
+# --- 3. RENDER MANAGEMENT MENUS ---
 def render_management(menu, engine, hash_password, delete_item):
     
     if menu == "Applicant Management":
         st.header("📋 Manage Proposals & Applicants")
         
+        # Bulk Add Button
+        if st.button("📚 Bulk Add Applicants"):
+            bulk_add_applicants_dialog(engine)
+            
         with st.expander("➕ Add Single Proposal"):
             with st.form("add_p", clear_on_submit=True):
                 a_name = st.text_input("Applicant Name*")
@@ -134,6 +186,10 @@ def render_management(menu, engine, hash_password, delete_item):
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
         
+        # Bulk Add Button
+        if st.button("📚 Bulk Add Reviewers"):
+            bulk_add_reviewers_dialog(engine, hash_password)
+            
         with st.expander("➕ Add Single Evaluator"):
             with st.form("add_rev", clear_on_submit=True):
                 r_name = st.text_input("Full Name*")
