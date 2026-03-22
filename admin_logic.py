@@ -174,8 +174,49 @@ def render_dashboard(engine):
                     <p style="font-size:1.1em; font-weight:bold; color:#1E3A8A;">{done_count} / {assigned_count} Assigned</p>
                 </div>
             """, unsafe_allow_html=True)
+            
+    st.divider()
+    
+    # ---> NEW DANGER ZONE FOR SAVING AND RESETTING <---
+    with st.expander("⚠️ Danger Zone: Save & Reset System"):
+        st.warning("This will **archive all current reviews** to a history table and **delete all current applicants and assignments** to prepare for a brand new evaluation cycle. Reviewer and Admin accounts will NOT be deleted.")
+        
+        # Confirmation checkbox to prevent accidental clicks
+        confirm_reset = st.checkbox("I understand and want to reset the evaluation cycle.")
+        
+        if st.button("🗄️ Save & Start New Cycle", type="primary", disabled=not confirm_reset):
+            with engine.begin() as conn:
+                # 1. Create history table if it doesn't exist
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS reviews_history (
+                        archive_id SERIAL PRIMARY KEY,
+                        reviewer_username VARCHAR(255),
+                        applicant_name VARCHAR(255),
+                        responses TEXT,
+                        final_recommendation VARCHAR(50),
+                        overall_justification TEXT,
+                        submitted_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                
+                # 2. Archive current reviews safely
+                conn.execute(text("""
+                    INSERT INTO reviews_history (reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at)
+                    SELECT reviewer_username, applicant_name, responses, final_recommendation, overall_justification, submitted_at, updated_at FROM reviews
+                """))
+                
+                # 3. Wipe current cycle tables
+                conn.execute(text("DELETE FROM reviews"))
+                conn.execute(text("DELETE FROM applicant_assignments"))
+                conn.execute(text("DELETE FROM applicants"))
+                
+            st.success("✅ System successfully archived and reset for a new cycle!")
+            time.sleep(2)
+            st.rerun()
 
-# --- 3. RENDER MANAGEMENT MENUS ---
+# --- 4. RENDER MANAGEMENT MENUS ---
 def render_management(menu, engine, hash_password, delete_item):
     
     if menu == "Applicant Management":
