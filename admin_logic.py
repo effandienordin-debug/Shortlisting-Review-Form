@@ -30,6 +30,7 @@ def bulk_add_applicants_dialog(engine):
             return
         lines = [line.strip() for line in raw_data.split('\n') if line.strip()]
         count = 0
+        duplicates = []
         with engine.begin() as conn:
             for line in lines:
                 parts = [p.strip() for p in line.split(',')]
@@ -39,14 +40,26 @@ def bulk_add_applicants_dialog(engine):
                     inst = parts[2] if len(parts) > 2 else None
                     link = parts[3] if len(parts) > 3 else None
                     rem = parts[4] if len(parts) > 4 else None
-                    conn.execute(text("""
-                        INSERT INTO applicants (name, proposal_title, institution, info_link, remarks) 
-                        VALUES (:n, :t, :i, :l, :r) ON CONFLICT DO NOTHING
-                    """), {"n": app, "t": title, "i": inst, "l": link, "r": rem})
-                    count += 1
-        st.success(f"✅ Successfully imported {count} applicants!")
-        time.sleep(1)
-        st.rerun()
+                    
+                    # Semak duplicate sebelum insert
+                    check = conn.execute(text("SELECT id FROM applicants WHERE name = :n"), {"n": app}).fetchone()
+                    if check:
+                        duplicates.append(app)
+                    else:
+                        conn.execute(text("""
+                            INSERT INTO applicants (name, proposal_title, institution, info_link, remarks) 
+                            VALUES (:n, :t, :i, :l, :r)
+                        """), {"n": app, "t": title, "i": inst, "l": link, "r": rem})
+                        count += 1
+        
+        if count > 0:
+            st.success(f"✅ Successfully imported {count} applicants!")
+        if duplicates:
+            st.warning(f"⚠️ The following names already exist and were skipped: {', '.join(duplicates)}")
+        
+        if count > 0:
+            time.sleep(1)
+            st.rerun()
 
 @st.dialog("📚 Bulk Add Reviewers")
 def bulk_add_reviewers_dialog(engine, hash_password):
@@ -204,21 +217,29 @@ def render_management(menu, engine, hash_password, delete_item):
                 if st.form_submit_button("Add"):
                     if a_name and p_title:
                         photo_bytes = p_photo.getvalue() if p_photo else None
-                        with engine.begin() as conn:
-                            conn.execute(text("""
-                                INSERT INTO applicants (name, proposal_title, institution, info_link, remarks, photo) 
-                                VALUES (:n, :t, :i, :l, :r, :p) ON CONFLICT DO NOTHING
-                            """), {"n": a_name.strip(), "t": p_title.strip(), "i": p_inst.strip(), "l": p_link, "r": p_rem, "p": photo_bytes})
-                        st.success("✅ Added Successfully!"); time.sleep(1); st.rerun()
+                        try:
+                            with engine.begin() as conn:
+                                # Remove 'ON CONFLICT DO NOTHING' to catch duplicate errors
+                                conn.execute(text("""
+                                    INSERT INTO applicants (name, proposal_title, institution, info_link, remarks, photo) 
+                                    VALUES (:n, :t, :i, :l, :r, :p)
+                                """), {"n": a_name.strip(), "t": p_title.strip(), "i": p_inst.strip(), "l": p_link, "r": p_rem, "p": photo_bytes})
+                            st.success(f"✅ {a_name} successfully added!"); time.sleep(1); st.rerun()
+                        except Exception as e:
+                            if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
+                                st.error(f"🚨 Error: The name '{a_name}' already exists.")
+                            else:
+                                st.error(f"❌ System Error: {e}")
+                    else:
+                        st.error("🚨 Name and Title are required.")
 
         st.divider()
         st.subheader("🔗 Assign & Manage Applicants")
         
-        # Ambil data pemohon
         apps_df = pd.read_sql("SELECT id, name, proposal_title, institution, remarks, info_link FROM applicants ORDER BY id ASC", engine)
         revs_df = pd.read_sql("SELECT username, full_name FROM reviewers", engine)
         
-        # --- PAPAR TOTAL APPLICANTS ---
+        # --- TOTAL APPLICANTS ---
         total_apps = len(apps_df)
         st.info(f"📊 **Total Applicants Registered:** {total_apps}")
 
@@ -230,15 +251,13 @@ def render_management(menu, engine, hash_password, delete_item):
         reviewer_options = revs_df['username'].tolist() if not revs_df.empty else []
         reviewer_map = dict(zip(revs_df['username'], revs_df['full_name']))
         
-        # --- LOOP DENGAN NUMBERING ---
+        # --- LOOP WITH NUMBERING ---
         for idx, row in apps_df.iterrows():
             app_name = row['name']
-            numbering = idx + 1 # Penomboran bermula dari 1
+            numbering = idx + 1
             
             with st.container(border=True):
                 c1, c2, c3 = st.columns([4, 3, 2])
-                
-                # Papar nombor di hadapan nama
                 c1.write(f"**{numbering}. {app_name}**")
                 c1.caption(f"🏫 {row['institution'] if row['institution'] else 'No Institution'}")
                 c1.caption(f"Proposal: {row['proposal_title']}")
