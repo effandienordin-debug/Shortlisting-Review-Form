@@ -213,8 +213,15 @@ def render_management(menu, engine, hash_password, delete_item):
 
         st.divider()
         st.subheader("🔗 Assign & Manage Applicants")
+        
+        # Ambil data pemohon
         apps_df = pd.read_sql("SELECT id, name, proposal_title, institution, remarks, info_link FROM applicants ORDER BY id ASC", engine)
         revs_df = pd.read_sql("SELECT username, full_name FROM reviewers", engine)
+        
+        # --- PAPAR TOTAL APPLICANTS ---
+        total_apps = len(apps_df)
+        st.info(f"📊 **Total Applicants Registered:** {total_apps}")
+
         try:
             assign_df = pd.read_sql("SELECT applicant_name, reviewer_username FROM applicant_assignments", engine)
         except:
@@ -223,11 +230,16 @@ def render_management(menu, engine, hash_password, delete_item):
         reviewer_options = revs_df['username'].tolist() if not revs_df.empty else []
         reviewer_map = dict(zip(revs_df['username'], revs_df['full_name']))
         
+        # --- LOOP DENGAN NUMBERING ---
         for idx, row in apps_df.iterrows():
             app_name = row['name']
+            numbering = idx + 1 # Penomboran bermula dari 1
+            
             with st.container(border=True):
                 c1, c2, c3 = st.columns([4, 3, 2])
-                c1.write(f"**{app_name}**")
+                
+                # Papar nombor di hadapan nama
+                c1.write(f"**{numbering}. {app_name}**")
                 c1.caption(f"🏫 {row['institution'] if row['institution'] else 'No Institution'}")
                 c1.caption(f"Proposal: {row['proposal_title']}")
                 if row['remarks']: c1.info(f"Nota: {row['remarks']}")
