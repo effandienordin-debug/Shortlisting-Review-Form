@@ -51,6 +51,6 @@ def render_evaluation_fields(prev_resp=None, prev_data=None, disabled=False):
         horizontal=True, 
         disabled=disabled
     )
-    j21 = st.text_area("Final justification", value=prev_data.get('overall_justification', ""), disabled=disabled)
+    j21 = st.text_area("Final justification *", value=prev_data.get('overall_justification', ""), disabled=disabled)
     
     return {"responses": responses, "recommendation": q20, "justification": j21}
