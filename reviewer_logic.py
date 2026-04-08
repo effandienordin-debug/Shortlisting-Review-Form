@@ -74,6 +74,11 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
                 mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
+                is_incomplete = (
+                    any(res["responses"].get(c) is None for c in mandatory_codes) or 
+                    res["recommendation"] is None or 
+                    not res["justification"].strip()
+                )
                 is_incomplete = any(res["responses"].get(c) is None for c in mandatory_codes) or res["recommendation"] is None
                 
                 if is_incomplete:
