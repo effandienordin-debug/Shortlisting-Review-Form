@@ -74,12 +74,10 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
                 mandatory_codes = ["12a", "12b", "12c", "14a", "14b", "16a", "18a"]
-                
-                # --- TAMBAH SEMAKAN UNTUK FINAL JUSTIFICATION DI SINI ---
                 is_incomplete = (
                     any(res["responses"].get(c) is None for c in mandatory_codes) or 
                     res["recommendation"] is None or 
-                    not res["justification"].strip() # Semak jika justification kosong atau hanya ada whitespace
+                    not res["justification"].strip() # Kewajipan Final Justification
                 )
                 
                 if is_incomplete:
@@ -133,8 +131,17 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                                     color = "green" if rec == "Yes" else "red"
                                     st.markdown(f"**Status:** :green[✅ Saved]")
                                     st.markdown(f"**Final Recommendation:** :{color}[{rec}]")
+                                    
+                                    # ---> DIKEMBALIKAN: PAPARAN FINAL JUSTIFICATION <---
+                                    justification = r_data.get('overall_justification')
+                                    if justification:
+                                        st.caption(f"**💬 Final Justification:** {justification[:80]}...")
+                                    else:
+                                        st.caption("**💬 Final Justification:** Tiada ulasan.")
+                                    # ----------------------------------------------------
                                 else:
                                     st.markdown("**Status:** :orange[⏳ Awaiting Review]")
+                                    st.caption("Belum dinilai.")
                                 
                                 if st.button("Review/Edit", key=f"go_{row['id']}", use_container_width=True, disabled=is_locked):
                                     st.session_state.active_review_app = row['name']
