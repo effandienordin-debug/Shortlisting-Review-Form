@@ -41,7 +41,6 @@ def bulk_add_applicants_dialog(engine):
                     link = parts[3] if len(parts) > 3 else None
                     rem = parts[4] if len(parts) > 4 else None
                     
-                    # Semak duplicate sebelum insert
                     check = conn.execute(text("SELECT id FROM applicants WHERE name = :n"), {"n": app}).fetchone()
                     if check:
                         duplicates.append(app)
@@ -56,10 +55,33 @@ def bulk_add_applicants_dialog(engine):
             st.success(f"✅ Successfully imported {count} applicants!")
         if duplicates:
             st.warning(f"⚠️ The following names already exist and were skipped: {', '.join(duplicates)}")
-        
         if count > 0:
             time.sleep(1)
             st.rerun()
+
+# --- BARU: Dialog Bulk Add Reviewers ---
+@st.dialog("📚 Bulk Add Reviewers")
+def bulk_add_reviewers_dialog(engine, hash_password):
+    st.markdown("**Format:** `Full Name, Username, Password` (One per line)")
+    raw_data = st.text_area("Paste Reviewer List Here", height=200, placeholder="Dr. Rahmat, rahmat.d, Secur3P@ss!\nProf. Lim, lim.cs, 12345678")
+    
+    if st.button("Import Reviewers", type="primary"):
+        if not raw_data.strip():
+            st.error("🚨 Please paste data first.")
+            return
+        lines = [line.strip() for line in raw_data.split('\n') if line.strip()]
+        count = 0
+        with engine.begin() as conn:
+            for line in lines:
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 3:
+                    name, user, pwd = parts[0], parts[1], parts[2]
+                    conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :n, :p) ON CONFLICT DO NOTHING"), 
+                                 {"u": user.strip(), "n": name.strip(), "p": hash_password(pwd.strip())})
+                    count += 1
+        st.success(f"✅ Successfully imported {count} reviewers!")
+        time.sleep(1)
+        st.rerun()
 
 @st.dialog("✏️ Edit Applicant Details")
 def edit_applicant_dialog(app_id, old_name, old_title, old_inst, old_link, old_rem, engine):
@@ -85,8 +107,41 @@ def edit_applicant_dialog(app_id, old_name, old_title, old_inst, old_link, old_r
                     conn.execute(text("""
                         UPDATE applicants SET name=:n, proposal_title=:t, institution=:inst, info_link=:l, remarks=:r WHERE id=:id
                     """), {"n": new_name.strip(), "t": new_title.strip(), "inst": new_inst.strip(), "l": new_link, "r": new_rem, "id": app_id})
-            
             st.success("✅ Applicant Updated!")
+            time.sleep(1)
+            st.rerun()
+
+@st.dialog("✏️ Edit Reviewer Details")
+def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
+    new_name = st.text_input("Full Name*", value=old_name)
+    new_user = st.text_input("Username (Email/Staff ID)*", value=old_user)
+    new_pass = st.text_input("New Password (Leave blank to keep current)", type="password")
+    new_photo = st.file_uploader("Upload New Photo", type=['png', 'jpg'])
+    
+    if st.button("Save Changes", type="primary"):
+        if new_name and new_user:
+            with engine.begin() as conn:
+                if new_user != old_user:
+                    conn.execute(text("UPDATE applicant_assignments SET reviewer_username = :new WHERE reviewer_username = :old"), {"new": new_user, "old": old_user})
+                    conn.execute(text("UPDATE reviews SET reviewer_username = :new WHERE reviewer_username = :old"), {"new": new_user, "old": old_user})
+                
+                if new_pass:
+                    conn.execute(text("UPDATE reviewers SET full_name = :n, username = :u, password_hash = :p WHERE id = :id"),
+                                 {"n": new_name.strip(), "u": new_user.strip(), "p": hash_password(new_pass), "id": rev_id})
+                else:
+                    conn.execute(text("UPDATE reviewers SET full_name = :n, username = :u WHERE id = :id"),
+                                 {"n": new_name.strip(), "u": new_user.strip(), "id": rev_id})
+            
+            if new_photo:
+                save_path = os.path.join(PHOTO_DIR, f"{new_user.strip().replace(' ', '_')}.png")
+                with open(save_path, "wb") as f:
+                    f.write(new_photo.getvalue())
+            elif new_user != old_user:
+                old_path = os.path.join(PHOTO_DIR, f"{old_user.strip().replace(' ', '_')}.png")
+                new_path = os.path.join(PHOTO_DIR, f"{new_user.strip().replace(' ', '_')}.png")
+                if os.path.exists(old_path):
+                    os.rename(old_path, new_path)
+            st.success("✅ Reviewer Updated!")
             time.sleep(1)
             st.rerun()
 
@@ -172,7 +227,6 @@ def render_management(menu, engine, hash_password, delete_item):
                     else:
                         st.error("🚨 Name and Title are required.")
 
-        # --- DUPLICATE DETECTOR ---
         st.divider()
         with st.expander("🔍 Detect Duplicate Applicants"):
             st.write("Semakan ini mencari nama pemohon yang didaftarkan lebih daripada sekali.")
@@ -187,8 +241,6 @@ def render_management(menu, engine, hash_password, delete_item):
         st.divider()
         st.subheader("🔗 Assign & Manage Applicants")
         apps_df = pd.read_sql("SELECT id, name, proposal_title, institution, remarks, info_link FROM applicants ORDER BY id ASC", engine)
-        
-        # --- TOTAL APPLICANTS ---
         st.info(f"📊 **Total Applicants Registered:** {len(apps_df)}")
 
         revs_df = pd.read_sql("SELECT username, full_name FROM reviewers", engine)
@@ -200,7 +252,6 @@ def render_management(menu, engine, hash_password, delete_item):
         reviewer_options = revs_df['username'].tolist() if not revs_df.empty else []
         reviewer_map = dict(zip(revs_df['username'], revs_df['full_name']))
         
-        # --- LOOP WITH NUMBERING ---
         for idx, row in apps_df.iterrows():
             app_name = row['name']
             numbering = idx + 1
@@ -232,15 +283,62 @@ def render_management(menu, engine, hash_password, delete_item):
 
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
+        # DIPULIHKAN: Butang Bulk Add Reviewers
+        if st.button("📚 Bulk Add Reviewers"):
+            bulk_add_reviewers_dialog(engine, hash_password)
+
+        # DIPULIHKAN: Borang Add Single Evaluator
+        with st.expander("➕ Add Single Evaluator"):
+            with st.form("add_rev", clear_on_submit=True):
+                r_name = st.text_input("Full Name*")
+                r_user = st.text_input("Username (Email/Staff ID)*")
+                r_pass = st.text_input("Password*", type="password") 
+                e_file = st.file_uploader("Photo (Optional)", type=['png', 'jpg'])
+                if st.form_submit_button("Save Evaluator"):
+                    if r_name and r_user and r_pass:
+                        with engine.begin() as conn:
+                            conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :n, :p) ON CONFLICT DO NOTHING"),
+                                         {"u": r_user.strip(), "n": r_name.strip(), "p": hash_password(r_pass)})
+                        if e_file:
+                            save_path = os.path.join(PHOTO_DIR, f"{r_user.strip().replace(' ', '_')}.png")
+                            with open(save_path, "wb") as f:
+                                f.write(e_file.getvalue())
+                        st.success("✅ Evaluator Added!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("🚨 All fields are required.")
+
+        st.divider()
         df = pd.read_sql("SELECT id, username, full_name FROM reviewers ORDER BY id ASC", engine)
         for idx, row in df.iterrows():
             c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 1])
             c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
             c2.write(f"**{row['full_name']}**")
+            if c4.button("✏️", key=f"er_{row['id']}"): edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
             if c5.button("🗑️", key=f"dr_{row['id']}"): delete_item("reviewers", row['id'])
 
     elif menu == "User Management":
         st.header("🔑 System Admin Accounts")
+        # DIPULIHKAN: Borang Add Admin Account
+        with st.expander("➕ Add Admin"):
+            with st.form("add_admin", clear_on_submit=True):
+                u = st.text_input("Username*")
+                n = st.text_input("Full Name*")
+                p = st.text_input("Password*", type="password") 
+                r = st.selectbox("Role", ["Admin", "Viewer"])
+                if st.form_submit_button("Create Account"):
+                    if u and p and n:
+                        with engine.begin() as conn:
+                            conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :n, :r, :p) ON CONFLICT DO NOTHING"),
+                                         {"u": u.strip(), "n": n.strip(), "r": r, "p": hash_password(p)})
+                        st.success("✅ Admin Added!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("🚨 Username, Name, and Password are required.")
+
+        st.divider()
         df = pd.read_sql("SELECT id, username, full_name, role FROM users ORDER BY id ASC", engine)
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([3, 2, 1])
