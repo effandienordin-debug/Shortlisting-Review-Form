@@ -15,10 +15,11 @@ init_db()
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
 # --- 1. COOKIE MANAGER SETUP ---
-def get_manager():
-    return stx.CookieManager()
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager(key="unique_cookie_manager_key")
 
-cookie_manager = get_manager()
+cookie_manager = get_cookie_manager()
 
 # Initialize session state if not exist
 if 'authenticated' not in st.session_state:
