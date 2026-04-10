@@ -6,7 +6,6 @@ from sqlalchemy import text
 # --- 1. CACHED DATA FETCHING ---
 @st.cache_resource(ttl=60)
 def get_assigned_applicants(_engine, username):
-    # Fetch only applicants assigned to the logged-in reviewer
     query = text("""
         SELECT a.* FROM applicants a
         JOIN applicant_assignments aa ON a.name = aa.applicant_name
@@ -24,29 +23,22 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
     """)
     st.divider()
     
-    # Welcome Card
     with st.container(border=True):
         col_icon, col_greet = st.columns([1, 10])
         col_icon.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=65)
         col_greet.markdown(f"### Welcome back, {st.session_state.full_name}!")
         col_greet.caption(f"🔬 Logged in as: {st.session_state.username} | Role: Reviewer")
 
-    # Check if the reviewer has finalized their batch
     is_locked = pd.read_sql(text("SELECT COUNT(*) FROM reviews WHERE reviewer_username = :u AND is_final = TRUE"), 
                             engine, params={"u": st.session_state.username}).iloc[0,0] > 0
 
     if st.session_state.get('active_review_app'):
         # --- INDIVIDUAL REVIEW PAGE ---
         name = st.session_state.active_review_app
-        
-        # Ambil data pemohon termasuk Institution dan Remarks
         app = pd.read_sql(text("SELECT * FROM applicants WHERE name = :n"), engine, params={"n": name}).iloc[0]
-        
-        # Ambil data review sedia ada
         rev = pd.read_sql(text("SELECT * FROM reviews WHERE reviewer_username = :u AND applicant_name = :a"), 
                           engine, params={"u": st.session_state.username, "a": name})
         
-        # PENYELESAIAN NameError: Pastikan prev_resp sentiasa ditakrifkan
         prev_resp = {} 
         if not rev.empty and rev.iloc[0]['responses']:
             try:
@@ -59,7 +51,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             if app['photo']: col_img.image(bytes(app['photo']), width=150)
             
             col_txt.subheader(name)
-            # Paparan medan baru: Institution & Remarks
             col_txt.markdown(f"**Institution:** {app['institution'] if app['institution'] else 'N/A'}")
             col_txt.write(f"**Proposal:** {app['proposal_title']}")
             
@@ -69,7 +60,6 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
             col_txt.markdown(f"🔗 [View Documents]({app['info_link']})")
 
         with st.form("eval_form"):
-            # Panggil fungsi evaluation fields
             res = render_evaluation_fields(prev_resp, rev.iloc[0].to_dict() if not rev.empty else {}, disabled=is_locked)
             
             if not is_locked and st.form_submit_button("💾 Save Draft", use_container_width=True, type="primary"):
@@ -77,7 +67,7 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                 is_incomplete = (
                     any(res["responses"].get(c) is None for c in mandatory_codes) or 
                     res["recommendation"] is None or 
-                    not res["justification"].strip() # Kewajipan Final Justification
+                    not res["justification"].strip()
                 )
                 
                 if is_incomplete:
@@ -94,8 +84,8 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                     st.cache_resource.clear() 
                     st.session_state.active_review_app = None
                     st.rerun()
-                    
-        if st.button("⬅️ Back to Gallery"):
+
+        if st.button("⬅️ Back to Gallery", use_container_width=True):
             st.session_state.active_review_app = None
             st.rerun()
     else:
@@ -132,13 +122,11 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                                     st.markdown(f"**Status:** :green[✅ Saved]")
                                     st.markdown(f"**Final Recommendation:** :{color}[{rec}]")
                                     
-                                    # ---> DIKEMBALIKAN: PAPARAN FINAL JUSTIFICATION <---
                                     justification = r_data.get('overall_justification')
                                     if justification:
                                         st.caption(f"**💬 Final Justification:** {justification[:80]}...")
                                     else:
                                         st.caption("**💬 Final Justification:** Tiada ulasan.")
-                                    # ----------------------------------------------------
                                 else:
                                     st.markdown("**Status:** :orange[⏳ Awaiting Review]")
                                     st.caption("Belum dinilai.")
