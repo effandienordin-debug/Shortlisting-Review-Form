@@ -9,29 +9,31 @@ from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form
 from reporting_logic import render_reporting 
 
-# Inisialisasi Database
+# 1. Inisialisasi Database
 init_db()
 
+# 2. Konfigurasi Halaman
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
-# --- 1. COOKIE MANAGER SETUP ---
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager(key="unique_cookie_manager_key")
+# --- 3. COOKIE MANAGER SETUP (STABLE VERSION) ---
+# Kita simpan manager dalam session_state supaya ia dibina SEKALI SAHAJA setiap sesi
+if 'cookie_manager' not in st.session_state:
+    st.session_state.cookie_manager = stx.CookieManager(key="rbs_cookie_manager_v1")
 
-cookie_manager = get_cookie_manager()
+cookie_manager = st.session_state.cookie_manager
 
-# Initialize session state if not exist
+# Initialize authentication status
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# --- 2. AUTO-LOGIN LOGIC (READ FROM COOKIES) ---
-# Jika session state kosong tetapi kuki ada, pulihkan session
+# --- 4. AUTO-LOGIN LOGIC (READ FROM COOKIES) ---
+# Jika session state False (baru buka/refresh), cuba ambil data dari kuki
 if not st.session_state.authenticated:
     saved_user = cookie_manager.get('rbs_user')
     saved_role = cookie_manager.get('rbs_role')
     saved_name = cookie_manager.get('rbs_name')
     
+    # Jika kuki wujud, automatik login semula
     if saved_user and saved_role and saved_name:
         st.session_state.update({
             "authenticated": True,
@@ -40,14 +42,15 @@ if not st.session_state.authenticated:
             "full_name": saved_name
         })
 
-# --- 3. LOGIN INTERFACE ---
+# --- 5. LOGIN INTERFACE ---
 if not st.session_state.authenticated:
     st.title("🔐 RBS Login")
-    with st.form("login"):
+    with st.form("login_form"):
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
-        if st.form_submit_button("Login"):
+        if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
+                # Semak kredential dalam table users (Admin) dan reviewers (Reviewer)
                 query = text("""
                     SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u 
                     UNION 
@@ -56,7 +59,7 @@ if not st.session_state.authenticated:
                 res = conn.execute(query, {"u": u}).fetchone()
                 
                 if res and check_password(p, res[0]):
-                    # Simpan dalam session state
+                    # A. Simpan dalam Session State (Memori semasa)
                     st.session_state.update({
                         "authenticated": True, 
                         "username": u, 
@@ -64,33 +67,35 @@ if not st.session_state.authenticated:
                         "full_name": res[2]
                     })
                     
-                    # Simpan dalam Cookies (Tahan selama 1 hari)
+                    # B. Simpan dalam Browser Cookies (Tahan selama 1 hari)
+                    # Ini yang menghalang logout bila refresh
                     expiry = datetime.now() + timedelta(days=1)
                     cookie_manager.set('rbs_user', u, expires_at=expiry)
                     cookie_manager.set('rbs_role', res[1], expires_at=expiry)
                     cookie_manager.set('rbs_name', res[2], expires_at=expiry)
                     
-                    st.success("Login successful!")
+                    st.success("Login successful! Redirecting...")
                     st.rerun()
                 else:
-                    st.error("Invalid credentials")
+                    st.error("Invalid credentials. Please check your username or password.")
     st.stop()
 
-# --- 4. SIDEBAR & NAVIGATION ---
+# --- 6. SIDEBAR & NAVIGATION (Bila dah Login) ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
-    st.caption(f"Role: {st.session_state.role}")
+    st.caption(f"Logged in as: {st.session_state.role}")
     
-    # Navigation Menu
+    # Menu Navigasi
     if st.session_state.role == "Admin":
         opts = ["Dashboard", "Reporting", "User Management", "Reviewer Management", "Applicant Management"]
         menu = st.radio("Navigation", opts)
     else:
+        # Reviewer terus ke borang tanpa menu lain
         menu = "Review Form"
     
     st.divider()
     
-    # Logout Button (Mesti padam session DAN kuki)
+    # Butang Logout (Mesti buang Session DAN Kuki)
     if st.button("Logout", use_container_width=True, type="primary"):
         cookie_manager.delete('rbs_user')
         cookie_manager.delete('rbs_role')
@@ -98,7 +103,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 5. MODULE ROUTING ---
+# --- 7. MODULE ROUTING ---
 if menu == "Dashboard":
     render_dashboard(engine)
 elif menu == "Reporting": 
