@@ -21,12 +21,11 @@ st.set_page_config(page_title="RBS Grant System", layout="wide")
 cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
 
 # --- 4. LOGIK WAJIB UNTUK REFRESH (ANTI-LOGOUT) ---
-# Trik ini memberi masa kepada Browser untuk menghantar kuki kepada Python
 if 'cookies_ready' not in st.session_state:
     st.session_state.cookies_ready = True
     with st.spinner("🔄 Memulihkan sesi anda..."):
-        time.sleep(1.5) # Beri masa 1.5 saat untuk kuki disegerakkan
-    st.stop() # Hentikan skrip sementara supaya borang login tak muncul!
+        time.sleep(1.5) 
+    st.stop() 
 
 # Initialize authentication status
 if 'authenticated' not in st.session_state:
@@ -34,34 +33,37 @@ if 'authenticated' not in st.session_state:
 
 # --- 5. AUTO-LOGIN LOGIC (BACA DARI KUKI) ---
 if not st.session_state.authenticated:
-    session_data = cookie_manager.get('rbs_session_data')
     
-    if session_data:
-        try:
-            if isinstance(session_data, str):
-                session_data = json.loads(session_data)
-                
-            st.session_state.update({
-                "authenticated": True,
-                "username": session_data.get('username'),
-                "role": session_data.get('role'),
-                "full_name": session_data.get('full_name')
-            })
-        except Exception:
-            pass 
+    # [PENYELESAIAN ISU LOGOUT]: Abaikan kuki jika user baru sahaja tekan butang Logout
+    if st.session_state.get('just_logged_out'):
+        st.session_state.just_logged_out = False # Reset bendera
+    else:
+        session_data = cookie_manager.get('rbs_session_data')
+        
+        if session_data:
+            try:
+                if isinstance(session_data, str):
+                    session_data = json.loads(session_data)
+                    
+                st.session_state.update({
+                    "authenticated": True,
+                    "username": session_data.get('username'),
+                    "role": session_data.get('role'),
+                    "full_name": session_data.get('full_name')
+                })
+            except Exception:
+                pass 
 
 # --- 6. LOGIN INTERFACE ---
 if not st.session_state.authenticated:
     st.title("🔐 RBS Login")
     with st.form("login_form"):
-        # Pilihan Peranan
         login_role = st.radio("Log in as:", ["Reviewer", "Admin"], horizontal=True)
         
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
-                # Query spesifik untuk elak masalah username sama
                 if login_role == "Admin":
                     query = text("SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u")
                 else:
@@ -106,16 +108,20 @@ with st.sidebar:
     
     st.divider()
     
-    # Butang Logout
+    # Butang Logout Terkini
     if st.button("Logout", use_container_width=True, type="primary"):
-        # Paksa buang kuki dengan menukar tarikh luput ke masa lalu
-        past_date = datetime.now() - timedelta(days=1)
-        cookie_manager.set('rbs_session_data', '', expires_at=past_date, key='force_expire_cookie')
+        # 1. Padam kuki dari browser
+        cookie_manager.delete('rbs_session_data', key='logout_del_cookie')
         
-        # Kosongkan memory session
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-            
+        # 2. Pasang 'bendera' supaya sistem tahu kita baru logout
+        st.session_state.just_logged_out = True
+        
+        # 3. Buang maklumat sesi
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.role = None
+        st.session_state.full_name = None
+        
         st.rerun()
 
 # --- 8. MODULE ROUTING ---
