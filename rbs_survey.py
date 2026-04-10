@@ -102,11 +102,20 @@ with st.sidebar:
     
     st.divider()
     
-    # Butang Logout
+    # Butang Logout yang Diperbaiki
     if st.button("Logout", use_container_width=True, type="primary"):
+        # 1. Arahkan browser padam kuki
         cookie_manager.delete('rbs_session_data', key='del_login_cookie')
-        time.sleep(1) # <--- TAMBAH INI: Beri 1 saat untuk browser padam kuki sepenuhnya
-        st.session_state.clear()
+        
+        # 2. Hard clear session state
+        for key in list(st.session_state.keys()):
+            if key != 'cookie_manager': # Kekalkan manager untuk fungsi hapus
+                del st.session_state[key]
+        
+        # 3. Set semula status auth kepada False secara paksa
+        st.session_state.authenticated = False
+        
+        # 4. Refresh skrin dengan segera
         st.rerun()
 
 # --- 7. MODULE ROUTING ---
