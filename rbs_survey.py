@@ -29,7 +29,12 @@ if st.session_state.get('pending_login_cookie'):
     del st.session_state['pending_login_cookie']
 
 if st.session_state.get('pending_logout'):
-    cookie_manager.delete('rbs_session_data')
+    try:
+        # Cuba padam kuki
+        cookie_manager.delete('rbs_session_data')
+    except KeyError:
+        # Jika kuki sudah tiada, abaikan ralat ini (jangan crash)
+        pass 
     del st.session_state['pending_logout']
 
 # --- 4. INIT AUTH STATE ---
