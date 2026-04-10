@@ -17,11 +17,10 @@ init_db()
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
 # --- 2. COOKIE MANAGER SETUP ---
-@st.cache_resource
-def get_manager():
-    return stx.CookieManager(key="rbs_mgr")
+if 'cookie_manager' not in st.session_state:
+    st.session_state.cookie_manager = stx.CookieManager(key="rbs_mgr")
 
-cookie_manager = get_manager()
+cookie_manager = st.session_state.cookie_manager
 
 # --- 3. PROSES ARAHAN KUKI YANG TERTUNGGAK (PENDING QUEUE) ---
 # Teknik ini dijamin 100% berjaya kerana ia dijalankan pada permulaan kitaran render
