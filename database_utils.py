@@ -37,6 +37,7 @@ def get_radio_index(prev_dict, key):
 def delete_item(table, item_id):
     with engine.begin() as conn:
         conn.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": item_id})
+    st.cache_resource.clear() # ---> TAMBAH BARIS INI
     st.toast(f"Item deleted from {table}")
     st.rerun()
 
