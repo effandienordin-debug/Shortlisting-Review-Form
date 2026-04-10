@@ -260,7 +260,6 @@ def render_management(menu, engine, hash_password, delete_item):
         st.divider()
         st.subheader("🔗 Assign & Manage Applicants")
         
-        # --- BUTANG MASTER RESET SCORING ---
         with st.expander("⚠️ Master Reset All Scores"):
             st.warning("Tindakan ini akan memadam **SEMUA markah, ulasan, dan status hantar (submit)** untuk semua pemohon. Tugasan penilai (assignments) TIDAK akan dipadam.")
             confirm_master_reset = st.checkbox("Saya faham, kosongkan semua markah sekarang.")
@@ -274,7 +273,6 @@ def render_management(menu, engine, hash_password, delete_item):
                 st.success("✅ Semua markah dan ulasan telah berjaya dikosongkan!")
                 time.sleep(2)
                 st.rerun()
-        # -----------------------------------
 
         apps_df = pd.read_sql("SELECT id, name, proposal_title, institution, remarks, info_link FROM applicants ORDER BY id ASC", engine)
         st.info(f"📊 **Total Applicants Registered:** {len(apps_df)}")
@@ -311,7 +309,6 @@ def render_management(menu, engine, hash_password, delete_item):
                     st.cache_resource.clear()
                     st.success("Saved!"); time.sleep(0.5); st.rerun()
                 
-                # --- Butang Edit & Delete Sahaja (Reset Individu dibuang) ---
                 c3_1, c3_2 = c3.columns(2)
                 if c3_1.button("✏️", key=f"ed_{row['id']}"):
                     edit_applicant_dialog(row['id'], app_name, row['proposal_title'], row['institution'], row['info_link'], row['remarks'], engine)
@@ -360,4 +357,42 @@ def render_management(menu, engine, hash_password, delete_item):
         for idx, row in df.iterrows():
             c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 1])
             c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
-            c2.write(f"**{row['full
+            c2.write(f"**{row['full_name']}**")
+            if c4.button("✏️", key=f"er_{row['id']}"): edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
+            if c5.button("🗑️", key=f"dr_{row['id']}"): delete_item("reviewers", row['id'])
+
+    elif menu == "User Management":
+        st.header("🔑 System Admin Accounts")
+        
+        if st.button("🔄 Sync System Data", type="secondary", use_container_width=True):
+            st.cache_resource.clear()
+            st.rerun()
+            
+        st.divider()
+
+        with st.expander("➕ Add Admin"):
+            with st.form("add_admin", clear_on_submit=True):
+                u = st.text_input("Username*")
+                n = st.text_input("Full Name*")
+                p = st.text_input("Password*", type="password") 
+                r = st.selectbox("Role", ["Admin", "Viewer"])
+                if st.form_submit_button("Create Account"):
+                    if u and p and n:
+                        with engine.begin() as conn:
+                            conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :n, :r, :p) ON CONFLICT DO NOTHING"),
+                                         {"u": u.strip(), "n": n.strip(), "r": r, "p": hash_password(p)})
+                        
+                        st.cache_resource.clear()
+                        st.success("✅ Admin Added!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("🚨 Username, Name, and Password are required.")
+
+        st.divider()
+        df = pd.read_sql("SELECT id, username, full_name, role FROM users ORDER BY id ASC", engine)
+        for idx, row in df.iterrows():
+            c1, c2, c3 = st.columns([3, 2, 1])
+            c1.write(f"👤 **{row['full_name']}**")
+            if row['username'] != st.session_state.get('username'):
+                if c3.button("🗑️", key=f"du_{row['id']}"): delete_item("users", row['id'])
