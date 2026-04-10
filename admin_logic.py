@@ -52,6 +52,7 @@ def bulk_add_applicants_dialog(engine):
                         count += 1
         
         if count > 0:
+            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
             st.success(f"✅ Successfully imported {count} applicants!")
         if duplicates:
             st.warning(f"⚠️ The following names already exist and were skipped: {', '.join(duplicates)}")
@@ -59,7 +60,6 @@ def bulk_add_applicants_dialog(engine):
             time.sleep(1)
             st.rerun()
 
-# --- BARU: Dialog Bulk Add Reviewers ---
 @st.dialog("📚 Bulk Add Reviewers")
 def bulk_add_reviewers_dialog(engine, hash_password):
     st.markdown("**Format:** `Full Name, Username, Password` (One per line)")
@@ -79,6 +79,7 @@ def bulk_add_reviewers_dialog(engine, hash_password):
                     conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :n, :p) ON CONFLICT DO NOTHING"), 
                                  {"u": user.strip(), "n": name.strip(), "p": hash_password(pwd.strip())})
                     count += 1
+        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
         st.success(f"✅ Successfully imported {count} reviewers!")
         time.sleep(1)
         st.rerun()
@@ -107,6 +108,8 @@ def edit_applicant_dialog(app_id, old_name, old_title, old_inst, old_link, old_r
                     conn.execute(text("""
                         UPDATE applicants SET name=:n, proposal_title=:t, institution=:inst, info_link=:l, remarks=:r WHERE id=:id
                     """), {"n": new_name.strip(), "t": new_title.strip(), "inst": new_inst.strip(), "l": new_link, "r": new_rem, "id": app_id})
+            
+            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
             st.success("✅ Applicant Updated!")
             time.sleep(1)
             st.rerun()
@@ -141,6 +144,8 @@ def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
                 new_path = os.path.join(PHOTO_DIR, f"{new_user.strip().replace(' ', '_')}.png")
                 if os.path.exists(old_path):
                     os.rename(old_path, new_path)
+            
+            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
             st.success("✅ Reviewer Updated!")
             time.sleep(1)
             st.rerun()
@@ -148,6 +153,12 @@ def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
 # --- 2. RENDER DASHBOARD (TRACKER) ---
 def render_dashboard(engine):
     st.header("📊 Live Evaluation Tracker")
+    
+    # BUTANG SYNC UNTUK DASHBOARD
+    if st.button("🔄 Sync Dashboard Data"):
+        st.cache_resource.clear()
+        st.rerun()
+        
     revs_df = pd.read_sql("SELECT username, full_name FROM reviewers", engine)
     reviews_df = pd.read_sql("SELECT reviewer_username, is_final FROM reviews", engine)
     
@@ -192,12 +203,19 @@ def render_dashboard(engine):
                 conn.execute(text("DELETE FROM reviews"))
                 conn.execute(text("DELETE FROM applicant_assignments"))
                 conn.execute(text("DELETE FROM applicants"))
+            st.cache_resource.clear()
             st.success("✅ System Reset!"); time.sleep(2); st.rerun()
 
 # --- 4. RENDER MANAGEMENT MENUS ---
 def render_management(menu, engine, hash_password, delete_item):
     if menu == "Applicant Management":
         st.header("📋 Manage Proposals & Applicants")
+        
+        # --- BUTANG SYNC UTAMA ---
+        if st.button("🔄 Sync System Data (Click Before Assigning)", type="secondary"):
+            st.cache_resource.clear()
+            st.rerun()
+            
         if st.button("📚 Bulk Add Applicants"):
             bulk_add_applicants_dialog(engine)
             
@@ -218,6 +236,8 @@ def render_management(menu, engine, hash_password, delete_item):
                                     INSERT INTO applicants (name, proposal_title, institution, info_link, remarks, photo) 
                                     VALUES (:n, :t, :i, :l, :r, :p)
                                 """), {"n": a_name.strip(), "t": p_title.strip(), "i": p_inst.strip(), "l": p_link, "r": p_rem, "p": photo_bytes})
+                            
+                            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
                             st.success(f"✅ {a_name} successfully added!"); time.sleep(1); st.rerun()
                         except Exception as e:
                             if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
@@ -271,23 +291,27 @@ def render_management(menu, engine, hash_password, delete_item):
                         conn.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
                         for rev in selected_revs:
                             conn.execute(text("INSERT INTO applicant_assignments (applicant_name, reviewer_username) VALUES (:a, :r)"), {"a": app_name, "r": rev})
+                    
+                    st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
                     st.success("Saved!"); time.sleep(0.5); st.rerun()
                 
                 c3_1, c3_2 = c3.columns(2)
                 if c3_1.button("✏️", key=f"ed_{row['id']}"):
                     edit_applicant_dialog(row['id'], app_name, row['proposal_title'], row['institution'], row['info_link'], row['remarks'], engine)
                 if c3_2.button("🗑️", key=f"dl_{row['id']}"):
-                    with engine.begin() as conn:
-                        conn.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
                     delete_item("applicants", row['id'])
 
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
-        # DIPULIHKAN: Butang Bulk Add Reviewers
+        
+        # --- BUTANG SYNC UTAMA ---
+        if st.button("🔄 Sync System Data", type="secondary"):
+            st.cache_resource.clear()
+            st.rerun()
+
         if st.button("📚 Bulk Add Reviewers"):
             bulk_add_reviewers_dialog(engine, hash_password)
 
-        # DIPULIHKAN: Borang Add Single Evaluator
         with st.expander("➕ Add Single Evaluator"):
             with st.form("add_rev", clear_on_submit=True):
                 r_name = st.text_input("Full Name*")
@@ -303,6 +327,8 @@ def render_management(menu, engine, hash_password, delete_item):
                             save_path = os.path.join(PHOTO_DIR, f"{r_user.strip().replace(' ', '_')}.png")
                             with open(save_path, "wb") as f:
                                 f.write(e_file.getvalue())
+                        
+                        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
                         st.success("✅ Evaluator Added!")
                         time.sleep(1)
                         st.rerun()
@@ -320,7 +346,12 @@ def render_management(menu, engine, hash_password, delete_item):
 
     elif menu == "User Management":
         st.header("🔑 System Admin Accounts")
-        # DIPULIHKAN: Borang Add Admin Account
+        
+        # --- BUTANG SYNC UTAMA ---
+        if st.button("🔄 Sync System Data", type="secondary"):
+            st.cache_resource.clear()
+            st.rerun()
+
         with st.expander("➕ Add Admin"):
             with st.form("add_admin", clear_on_submit=True):
                 u = st.text_input("Username*")
@@ -332,6 +363,8 @@ def render_management(menu, engine, hash_password, delete_item):
                         with engine.begin() as conn:
                             conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :n, :r, :p) ON CONFLICT DO NOTHING"),
                                          {"u": u.strip(), "n": n.strip(), "r": r, "p": hash_password(p)})
+                        
+                        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
                         st.success("✅ Admin Added!")
                         time.sleep(1)
                         st.rerun()
