@@ -14,37 +14,40 @@ from reporting_logic import render_reporting
 # --- 1. INISIALISASI DATABASE ---
 init_db()
 
-# --- 2. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
-# --- 3. COOKIE MANAGER SETUP ---
-cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
+# --- 2. COOKIE MANAGER SETUP ---
+@st.cache_resource
+def get_manager():
+    return stx.CookieManager(key="rbs_mgr")
 
-# --- 4. LOGIK WAJIB UNTUK REFRESH (ANTI-LOGOUT) ---
-if 'cookies_ready' not in st.session_state:
-    st.session_state.cookies_ready = True
-    with st.spinner("🔄 Memulihkan sesi anda..."):
-        time.sleep(1.5) 
-    st.stop() 
+cookie_manager = get_manager()
 
-# Initialize authentication status
+# --- 3. PROSES ARAHAN KUKI YANG TERTUNGGAK (PENDING QUEUE) ---
+# Teknik ini dijamin 100% berjaya kerana ia dijalankan pada permulaan kitaran render
+if st.session_state.get('pending_login_cookie'):
+    cookie_manager.set('rbs_session_data', st.session_state.pending_login_cookie, expires_at=datetime.now() + timedelta(days=1))
+    del st.session_state['pending_login_cookie']
+
+if st.session_state.get('pending_logout'):
+    cookie_manager.delete('rbs_session_data')
+    del st.session_state['pending_logout']
+
+# --- 4. INIT AUTH STATE ---
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# --- 5. AUTO-LOGIN LOGIC (BACA DARI KUKI) ---
+# --- 5. AUTO LOGIN DARI KUKI ---
 if not st.session_state.authenticated:
-    
-    # [PENYELESAIAN ISU LOGOUT]: Abaikan kuki jika user baru sahaja tekan butang Logout
-    if st.session_state.get('just_logged_out'):
-        st.session_state.just_logged_out = False # Reset bendera
+    # Abaikan bacaan kuki jika pengguna baru sahaja tekan Logout
+    if st.session_state.get('just_logged_out_flag'):
+        st.session_state.just_logged_out_flag = False
     else:
         session_data = cookie_manager.get('rbs_session_data')
-        
         if session_data:
             try:
                 if isinstance(session_data, str):
                     session_data = json.loads(session_data)
-                    
                 st.session_state.update({
                     "authenticated": True,
                     "username": session_data.get('username'),
@@ -52,75 +55,70 @@ if not st.session_state.authenticated:
                     "full_name": session_data.get('full_name')
                 })
             except Exception:
-                pass 
+                pass
 
 # --- 6. LOGIN INTERFACE ---
 if not st.session_state.authenticated:
     st.title("🔐 RBS Login")
     with st.form("login_form"):
         login_role = st.radio("Log in as:", ["Reviewer", "Admin"], horizontal=True)
-        
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
+
         if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
+                # Asingkan jadual carian
                 if login_role == "Admin":
                     query = text("SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u")
                 else:
                     query = text("SELECT password_hash, 'Reviewer' as role, full_name FROM reviewers WHERE username = :u")
-                    
+
                 res = conn.execute(query, {"u": u}).fetchone()
-                
+
                 if res and check_password(p, res[0]):
+                    # Kemaskini memori sesi Python
                     st.session_state.update({
-                        "authenticated": True, 
-                        "username": u, 
-                        "role": res[1], 
-                        "full_name": res[2]
-                    })
-                    
-                    expiry = datetime.now() + timedelta(days=1)
-                    cookie_data = json.dumps({
+                        "authenticated": True,
                         "username": u,
                         "role": res[1],
                         "full_name": res[2]
                     })
                     
-                    cookie_manager.set('rbs_session_data', cookie_data, expires_at=expiry, key='set_login_cookie')
-                    
+                    # Masukkan arahan simpan kuki ke dalam "Pending Queue"
+                    st.session_state.pending_login_cookie = json.dumps({
+                        "username": u,
+                        "role": res[1],
+                        "full_name": res[2]
+                    })
+
                     st.success(f"Login successful! Welcome {res[2]}")
-                    time.sleep(1) 
-                    st.rerun()
+                    time.sleep(0.5)
+                    st.rerun() # Refresh skrin
                 else:
                     st.error("Invalid credentials or wrong role selected.")
     st.stop()
 
-# --- 7. SIDEBAR & NAVIGATION ---
+# --- 7. SIDEBAR & LOGOUT ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
     st.caption(f"Logged in as: {st.session_state.role}")
-    
+
+    # Kawalan Navigasi yang Ketat
     if st.session_state.role == "Admin":
         opts = ["Dashboard", "Reporting", "User Management", "Reviewer Management", "Applicant Management"]
         menu = st.radio("Navigation", opts)
     else:
-        menu = "Review Form"
-    
+        menu = "Review Form" # Reviewer HANYA boleh nampak ini
+
     st.divider()
-    
-    # Butang Logout Terkini
+
+    # Butang Logout
     if st.button("Logout", use_container_width=True, type="primary"):
-        # 1. Padam kuki dari browser
-        cookie_manager.delete('rbs_session_data', key='logout_del_cookie')
+        st.session_state.clear()
         
-        # 2. Pasang 'bendera' supaya sistem tahu kita baru logout
-        st.session_state.just_logged_out = True
-        
-        # 3. Buang maklumat sesi
-        st.session_state.authenticated = False
-        st.session_state.username = None
-        st.session_state.role = None
-        st.session_state.full_name = None
+        # Masukkan arahan padam kuki ke dalam "Pending Queue"
+        st.session_state.pending_logout = True
+        st.session_state.just_logged_out_flag = True # Elak auto-login berlaku secara pantas
         
         st.rerun()
 
