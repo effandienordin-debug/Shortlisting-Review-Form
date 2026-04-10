@@ -102,8 +102,10 @@ with st.sidebar:
     
     st.divider()
     
+    # Butang Logout
     if st.button("Logout", use_container_width=True, type="primary"):
         cookie_manager.delete('rbs_session_data', key='del_login_cookie')
+        time.sleep(1) # <--- TAMBAH INI: Beri 1 saat untuk browser padam kuki sepenuhnya
         st.session_state.clear()
         st.rerun()
 
