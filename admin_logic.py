@@ -52,7 +52,7 @@ def bulk_add_applicants_dialog(engine):
                         count += 1
         
         if count > 0:
-            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+            st.cache_resource.clear()
             st.success(f"✅ Successfully imported {count} applicants!")
         if duplicates:
             st.warning(f"⚠️ The following names already exist and were skipped: {', '.join(duplicates)}")
@@ -79,7 +79,7 @@ def bulk_add_reviewers_dialog(engine, hash_password):
                     conn.execute(text("INSERT INTO reviewers (username, full_name, password_hash) VALUES (:u, :n, :p) ON CONFLICT DO NOTHING"), 
                                  {"u": user.strip(), "n": name.strip(), "p": hash_password(pwd.strip())})
                     count += 1
-        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+        st.cache_resource.clear()
         st.success(f"✅ Successfully imported {count} reviewers!")
         time.sleep(1)
         st.rerun()
@@ -109,7 +109,7 @@ def edit_applicant_dialog(app_id, old_name, old_title, old_inst, old_link, old_r
                         UPDATE applicants SET name=:n, proposal_title=:t, institution=:inst, info_link=:l, remarks=:r WHERE id=:id
                     """), {"n": new_name.strip(), "t": new_title.strip(), "inst": new_inst.strip(), "l": new_link, "r": new_rem, "id": app_id})
             
-            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+            st.cache_resource.clear()
             st.success("✅ Applicant Updated!")
             time.sleep(1)
             st.rerun()
@@ -145,7 +145,7 @@ def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
                 if os.path.exists(old_path):
                     os.rename(old_path, new_path)
             
-            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+            st.cache_resource.clear()
             st.success("✅ Reviewer Updated!")
             time.sleep(1)
             st.rerun()
@@ -154,8 +154,7 @@ def edit_reviewer_dialog(rev_id, old_user, old_name, engine, hash_password):
 def render_dashboard(engine):
     st.header("📊 Live Evaluation Tracker")
     
-    # BUTANG SYNC UNTUK DASHBOARD
-    if st.button("🔄 Sync Dashboard Data"):
+    if st.button("🔄 Sync Dashboard Data", type="secondary"):
         st.cache_resource.clear()
         st.rerun()
         
@@ -211,11 +210,11 @@ def render_management(menu, engine, hash_password, delete_item):
     if menu == "Applicant Management":
         st.header("📋 Manage Proposals & Applicants")
         
-        # --- BUTANG SYNC UTAMA ---
-        if st.button("🔄 Sync System Data (Click Before Assigning)", type="secondary"):
+        if st.button("🔄 Sync System Data (Click Before Assigning)", type="secondary", use_container_width=True):
             st.cache_resource.clear()
             st.rerun()
             
+        st.divider()
         if st.button("📚 Bulk Add Applicants"):
             bulk_add_applicants_dialog(engine)
             
@@ -237,7 +236,7 @@ def render_management(menu, engine, hash_password, delete_item):
                                     VALUES (:n, :t, :i, :l, :r, :p)
                                 """), {"n": a_name.strip(), "t": p_title.strip(), "i": p_inst.strip(), "l": p_link, "r": p_rem, "p": photo_bytes})
                             
-                            st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+                            st.cache_resource.clear()
                             st.success(f"✅ {a_name} successfully added!"); time.sleep(1); st.rerun()
                         except Exception as e:
                             if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
@@ -260,6 +259,23 @@ def render_management(menu, engine, hash_password, delete_item):
 
         st.divider()
         st.subheader("🔗 Assign & Manage Applicants")
+        
+        # --- BUTANG MASTER RESET SCORING ---
+        with st.expander("⚠️ Master Reset All Scores"):
+            st.warning("Tindakan ini akan memadam **SEMUA markah, ulasan, dan status hantar (submit)** untuk semua pemohon. Tugasan penilai (assignments) TIDAK akan dipadam.")
+            confirm_master_reset = st.checkbox("Saya faham, kosongkan semua markah sekarang.")
+            if st.button("🗑️ Master Reset Scoring", type="primary", disabled=not confirm_master_reset):
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE reviews 
+                        SET responses = '{}', final_recommendation = NULL, overall_justification = NULL, is_final = FALSE
+                    """))
+                st.cache_resource.clear()
+                st.success("✅ Semua markah dan ulasan telah berjaya dikosongkan!")
+                time.sleep(2)
+                st.rerun()
+        # -----------------------------------
+
         apps_df = pd.read_sql("SELECT id, name, proposal_title, institution, remarks, info_link FROM applicants ORDER BY id ASC", engine)
         st.info(f"📊 **Total Applicants Registered:** {len(apps_df)}")
 
@@ -292,22 +308,26 @@ def render_management(menu, engine, hash_password, delete_item):
                         for rev in selected_revs:
                             conn.execute(text("INSERT INTO applicant_assignments (applicant_name, reviewer_username) VALUES (:a, :r)"), {"a": app_name, "r": rev})
                     
-                    st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+                    st.cache_resource.clear()
                     st.success("Saved!"); time.sleep(0.5); st.rerun()
                 
+                # --- Butang Edit & Delete Sahaja (Reset Individu dibuang) ---
                 c3_1, c3_2 = c3.columns(2)
                 if c3_1.button("✏️", key=f"ed_{row['id']}"):
                     edit_applicant_dialog(row['id'], app_name, row['proposal_title'], row['institution'], row['info_link'], row['remarks'], engine)
                 if c3_2.button("🗑️", key=f"dl_{row['id']}"):
+                    with engine.begin() as conn:
+                        conn.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
                     delete_item("applicants", row['id'])
 
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
         
-        # --- BUTANG SYNC UTAMA ---
-        if st.button("🔄 Sync System Data", type="secondary"):
+        if st.button("🔄 Sync System Data", type="secondary", use_container_width=True):
             st.cache_resource.clear()
             st.rerun()
+            
+        st.divider()
 
         if st.button("📚 Bulk Add Reviewers"):
             bulk_add_reviewers_dialog(engine, hash_password)
@@ -328,7 +348,7 @@ def render_management(menu, engine, hash_password, delete_item):
                             with open(save_path, "wb") as f:
                                 f.write(e_file.getvalue())
                         
-                        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
+                        st.cache_resource.clear()
                         st.success("✅ Evaluator Added!")
                         time.sleep(1)
                         st.rerun()
@@ -340,41 +360,4 @@ def render_management(menu, engine, hash_password, delete_item):
         for idx, row in df.iterrows():
             c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 1])
             c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
-            c2.write(f"**{row['full_name']}**")
-            if c4.button("✏️", key=f"er_{row['id']}"): edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
-            if c5.button("🗑️", key=f"dr_{row['id']}"): delete_item("reviewers", row['id'])
-
-    elif menu == "User Management":
-        st.header("🔑 System Admin Accounts")
-        
-        # --- BUTANG SYNC UTAMA ---
-        if st.button("🔄 Sync System Data", type="secondary"):
-            st.cache_resource.clear()
-            st.rerun()
-
-        with st.expander("➕ Add Admin"):
-            with st.form("add_admin", clear_on_submit=True):
-                u = st.text_input("Username*")
-                n = st.text_input("Full Name*")
-                p = st.text_input("Password*", type="password") 
-                r = st.selectbox("Role", ["Admin", "Viewer"])
-                if st.form_submit_button("Create Account"):
-                    if u and p and n:
-                        with engine.begin() as conn:
-                            conn.execute(text("INSERT INTO users (username, full_name, role, password_hash) VALUES (:u, :n, :r, :p) ON CONFLICT DO NOTHING"),
-                                         {"u": u.strip(), "n": n.strip(), "r": r, "p": hash_password(p)})
-                        
-                        st.cache_resource.clear() # CLEAR CACHE UNTUK SYNC
-                        st.success("✅ Admin Added!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("🚨 Username, Name, and Password are required.")
-
-        st.divider()
-        df = pd.read_sql("SELECT id, username, full_name, role FROM users ORDER BY id ASC", engine)
-        for idx, row in df.iterrows():
-            c1, c2, c3 = st.columns([3, 2, 1])
-            c1.write(f"👤 **{row['full_name']}**")
-            if row['username'] != st.session_state.get('username'):
-                if c3.button("🗑️", key=f"du_{row['id']}"): delete_item("users", row['id'])
+            c2.write(f"**{row['full
