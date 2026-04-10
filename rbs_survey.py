@@ -17,25 +17,27 @@ init_db()
 # --- 2. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
-# --- 3. COOKIE MANAGER SETUP ---
-# Simpan manager dalam session_state supaya dibina SEKALI SAHAJA setiap sesi
-if 'cookie_manager' not in st.session_state:
-    st.session_state.cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
+# --- 3. COOKIE MANAGER SETUP (DENGAN DELAY SYNC) ---
+cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
 
-cookie_manager = st.session_state.cookie_manager
+# LOGIK PENTING: Beri masa komponen React kuki dimuatkan selepas refresh
+if 'cookie_synced' not in st.session_state:
+    st.session_state.cookie_synced = False
 
-# Initialize authentication status
+if not st.session_state.cookie_synced:
+    time.sleep(0.5) # Tunggu 0.5 saat untuk browser hantar kuki
+    st.session_state.cookie_synced = True
+    st.rerun() # Jalan semula skrip, kali ni kuki pasti dah ada
+
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# --- 4. AUTO-LOGIN LOGIC (READ FROM COOKIES) ---
-# Baca HANYA SATU kuki yang mengandungi semua info
+# --- 4. AUTO-LOGIN LOGIC ---
 if not st.session_state.authenticated:
     session_data = cookie_manager.get('rbs_session_data')
     
     if session_data:
         try:
-            # Parse data JSON kembali kepada dictionary
             if isinstance(session_data, str):
                 session_data = json.loads(session_data)
                 
@@ -46,7 +48,7 @@ if not st.session_state.authenticated:
                 "full_name": session_data.get('full_name')
             })
         except Exception:
-            pass # Abaikan ralat jika kuki rosak
+            pass 
 
 # --- 5. LOGIN INTERFACE ---
 if not st.session_state.authenticated:
@@ -56,7 +58,6 @@ if not st.session_state.authenticated:
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
-                # Semak kredential
                 query = text("""
                     SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u 
                     UNION 
@@ -65,7 +66,6 @@ if not st.session_state.authenticated:
                 res = conn.execute(query, {"u": u}).fetchone()
                 
                 if res and check_password(p, res[0]):
-                    # A. Update Session State
                     st.session_state.update({
                         "authenticated": True, 
                         "username": u, 
@@ -73,7 +73,6 @@ if not st.session_state.authenticated:
                         "full_name": res[2]
                     })
                     
-                    # B. Simpan DALAM SATU KUKI SAHAJA (Penyelesaian Ralat Duplicate Key)
                     expiry = datetime.now() + timedelta(days=1)
                     cookie_data = json.dumps({
                         "username": u,
@@ -81,17 +80,16 @@ if not st.session_state.authenticated:
                         "full_name": res[2]
                     })
                     
-                    # Hanya panggil .set() sekali dengan key yang spesifik
                     cookie_manager.set('rbs_session_data', cookie_data, expires_at=expiry, key='set_login_cookie')
                     
                     st.success("Login successful! Redirecting...")
-                    time.sleep(1) # Beri masa 1 saat untuk kuki didaftarkan sepenuhnya ke browser
+                    time.sleep(1) 
                     st.rerun()
                 else:
                     st.error("Invalid credentials. Please check your username or password.")
     st.stop()
 
-# --- 6. SIDEBAR & NAVIGATION (Bila dah Login) ---
+# --- 6. SIDEBAR & NAVIGATION ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
     st.caption(f"Logged in as: {st.session_state.role}")
@@ -104,9 +102,7 @@ with st.sidebar:
     
     st.divider()
     
-    # Butang Logout
     if st.button("Logout", use_container_width=True, type="primary"):
-        # Padam kuki tunggal tersebut
         cookie_manager.delete('rbs_session_data', key='del_login_cookie')
         st.session_state.clear()
         st.rerun()
