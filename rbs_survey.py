@@ -17,17 +17,20 @@ init_db()
 # --- 2. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
-# --- 3. COOKIE MANAGER SETUP (DENGAN DELAY SYNC) ---
-cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
+# --- 3. COOKIE MANAGER SETUP ---
+if 'cookie_manager' not in st.session_state:
+    st.session_state.cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
 
-# LOGIK PENTING: Beri masa komponen React kuki dimuatkan selepas refresh
+cookie_manager = st.session_state.cookie_manager
+
+# Beri masa komponen kuki dimuatkan selepas refresh
 if 'cookie_synced' not in st.session_state:
     st.session_state.cookie_synced = False
 
 if not st.session_state.cookie_synced:
-    time.sleep(0.5) # Tunggu 0.5 saat untuk browser hantar kuki
+    time.sleep(0.5)
     st.session_state.cookie_synced = True
-    st.rerun() # Jalan semula skrip, kali ni kuki pasti dah ada
+    st.rerun()
 
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
@@ -54,15 +57,19 @@ if not st.session_state.authenticated:
 if not st.session_state.authenticated:
     st.title("🔐 RBS Login")
     with st.form("login_form"):
+        # TAMBAHAN BARU: Pilihan Peranan (Role)
+        login_role = st.radio("Log in as:", ["Reviewer", "Admin"], horizontal=True)
+        
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
-                query = text("""
-                    SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u 
-                    UNION 
-                    SELECT password_hash, 'Reviewer' as role, full_name FROM reviewers WHERE username = :u
-                """)
+                # ASINGKAN QUERY BERDASARKAN PILIHAN (Elak konflik username)
+                if login_role == "Admin":
+                    query = text("SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u")
+                else:
+                    query = text("SELECT password_hash, 'Reviewer' as role, full_name FROM reviewers WHERE username = :u")
+                    
                 res = conn.execute(query, {"u": u}).fetchone()
                 
                 if res and check_password(p, res[0]):
@@ -82,11 +89,11 @@ if not st.session_state.authenticated:
                     
                     cookie_manager.set('rbs_session_data', cookie_data, expires_at=expiry, key='set_login_cookie')
                     
-                    st.success("Login successful! Redirecting...")
+                    st.success(f"Login successful! Welcome {res[2]} ({res[1]})")
                     time.sleep(1) 
                     st.rerun()
                 else:
-                    st.error("Invalid credentials. Please check your username or password.")
+                    st.error("Invalid credentials or wrong role selected. Please check your username and password.")
     st.stop()
 
 # --- 6. SIDEBAR & NAVIGATION ---
@@ -102,20 +109,18 @@ with st.sidebar:
     
     st.divider()
     
-    # Butang Logout yang Diperbaiki
     if st.button("Logout", use_container_width=True, type="primary"):
-        # 1. Arahkan browser padam kuki
-        cookie_manager.delete('rbs_session_data', key='del_login_cookie')
+        # TAMBAHAN BARU: Paksa kuki mati (Expire semalam)
+        past_date = datetime.now() - timedelta(days=1)
+        cookie_manager.set('rbs_session_data', '', expires_at=past_date, key='force_expire_cookie')
         
-        # 2. Hard clear session state
+        # Bersihkan semua pembolehubah sesi
         for key in list(st.session_state.keys()):
-            if key != 'cookie_manager': # Kekalkan manager untuk fungsi hapus
+            if key != 'cookie_manager':
                 del st.session_state[key]
-        
-        # 3. Set semula status auth kepada False secara paksa
+                
         st.session_state.authenticated = False
-        
-        # 4. Refresh skrin dengan segera
+        time.sleep(0.5) # Beri masa sikit untuk browser proses tarikh luput
         st.rerun()
 
 # --- 7. MODULE ROUTING ---
