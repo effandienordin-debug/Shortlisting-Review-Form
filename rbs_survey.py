@@ -1,6 +1,8 @@
 import streamlit as st
 import extra_streamlit_components as stx
 import pandas as pd
+import json
+import time
 from sqlalchemy import text
 from datetime import datetime, timedelta
 from database_utils import engine, init_db, check_password, hash_password, get_malaysia_time, delete_item
@@ -9,16 +11,16 @@ from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form
 from reporting_logic import render_reporting 
 
-# 1. Inisialisasi Database
+# --- 1. INISIALISASI DATABASE ---
 init_db()
 
-# 2. Konfigurasi Halaman
+# --- 2. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="RBS Grant System", layout="wide")
 
-# --- 3. COOKIE MANAGER SETUP (STABLE VERSION) ---
-# Kita simpan manager dalam session_state supaya ia dibina SEKALI SAHAJA setiap sesi
+# --- 3. COOKIE MANAGER SETUP ---
+# Simpan manager dalam session_state supaya dibina SEKALI SAHAJA setiap sesi
 if 'cookie_manager' not in st.session_state:
-    st.session_state.cookie_manager = stx.CookieManager(key="rbs_cookie_manager_v1")
+    st.session_state.cookie_manager = stx.CookieManager(key="rbs_cookie_mgr")
 
 cookie_manager = st.session_state.cookie_manager
 
@@ -27,20 +29,24 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
 # --- 4. AUTO-LOGIN LOGIC (READ FROM COOKIES) ---
-# Jika session state False (baru buka/refresh), cuba ambil data dari kuki
+# Baca HANYA SATU kuki yang mengandungi semua info
 if not st.session_state.authenticated:
-    saved_user = cookie_manager.get('rbs_user')
-    saved_role = cookie_manager.get('rbs_role')
-    saved_name = cookie_manager.get('rbs_name')
+    session_data = cookie_manager.get('rbs_session_data')
     
-    # Jika kuki wujud, automatik login semula
-    if saved_user and saved_role and saved_name:
-        st.session_state.update({
-            "authenticated": True,
-            "username": saved_user,
-            "role": saved_role,
-            "full_name": saved_name
-        })
+    if session_data:
+        try:
+            # Parse data JSON kembali kepada dictionary
+            if isinstance(session_data, str):
+                session_data = json.loads(session_data)
+                
+            st.session_state.update({
+                "authenticated": True,
+                "username": session_data.get('username'),
+                "role": session_data.get('role'),
+                "full_name": session_data.get('full_name')
+            })
+        except Exception:
+            pass # Abaikan ralat jika kuki rosak
 
 # --- 5. LOGIN INTERFACE ---
 if not st.session_state.authenticated:
@@ -50,7 +56,7 @@ if not st.session_state.authenticated:
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Login", use_container_width=True):
             with engine.connect() as conn:
-                # Semak kredential dalam table users (Admin) dan reviewers (Reviewer)
+                # Semak kredential
                 query = text("""
                     SELECT password_hash, 'Admin' as role, full_name FROM users WHERE username = :u 
                     UNION 
@@ -59,7 +65,7 @@ if not st.session_state.authenticated:
                 res = conn.execute(query, {"u": u}).fetchone()
                 
                 if res and check_password(p, res[0]):
-                    # A. Simpan dalam Session State (Memori semasa)
+                    # A. Update Session State
                     st.session_state.update({
                         "authenticated": True, 
                         "username": u, 
@@ -67,14 +73,19 @@ if not st.session_state.authenticated:
                         "full_name": res[2]
                     })
                     
-                    # B. Simpan dalam Browser Cookies (Tahan selama 1 hari)
-                    # Ini yang menghalang logout bila refresh
+                    # B. Simpan DALAM SATU KUKI SAHAJA (Penyelesaian Ralat Duplicate Key)
                     expiry = datetime.now() + timedelta(days=1)
-                    cookie_manager.set('rbs_user', u, expires_at=expiry)
-                    cookie_manager.set('rbs_role', res[1], expires_at=expiry)
-                    cookie_manager.set('rbs_name', res[2], expires_at=expiry)
+                    cookie_data = json.dumps({
+                        "username": u,
+                        "role": res[1],
+                        "full_name": res[2]
+                    })
+                    
+                    # Hanya panggil .set() sekali dengan key yang spesifik
+                    cookie_manager.set('rbs_session_data', cookie_data, expires_at=expiry, key='set_login_cookie')
                     
                     st.success("Login successful! Redirecting...")
+                    time.sleep(1) # Beri masa 1 saat untuk kuki didaftarkan sepenuhnya ke browser
                     st.rerun()
                 else:
                     st.error("Invalid credentials. Please check your username or password.")
@@ -85,21 +96,18 @@ with st.sidebar:
     st.title(f"👤 {st.session_state.full_name}")
     st.caption(f"Logged in as: {st.session_state.role}")
     
-    # Menu Navigasi
     if st.session_state.role == "Admin":
         opts = ["Dashboard", "Reporting", "User Management", "Reviewer Management", "Applicant Management"]
         menu = st.radio("Navigation", opts)
     else:
-        # Reviewer terus ke borang tanpa menu lain
         menu = "Review Form"
     
     st.divider()
     
-    # Butang Logout (Mesti buang Session DAN Kuki)
+    # Butang Logout
     if st.button("Logout", use_container_width=True, type="primary"):
-        cookie_manager.delete('rbs_user')
-        cookie_manager.delete('rbs_role')
-        cookie_manager.delete('rbs_name')
+        # Padam kuki tunggal tersebut
+        cookie_manager.delete('rbs_session_data', key='del_login_cookie')
         st.session_state.clear()
         st.rerun()
 
