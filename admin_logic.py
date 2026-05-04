@@ -353,13 +353,31 @@ def render_management(menu, engine, hash_password, delete_item):
                         st.error("🚨 All fields are required.")
 
         st.divider()
+        st.subheader("Current Evaluators & Access Control")
         df = pd.read_sql("SELECT id, username, full_name FROM reviewers ORDER BY id ASC", engine)
         for idx, row in df.iterrows():
-            c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 1])
-            c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
-            c2.write(f"**{row['full_name']}**")
-            if c4.button("✏️", key=f"er_{row['id']}"): edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
-            if c5.button("🗑️", key=f"dr_{row['id']}"): delete_item("reviewers", row['id'])
+            with st.container(border=True):
+                # Kolum diubahsuai untuk memberi ruang kepada butang Unlock
+                c1, c2, c3, c4, c5 = st.columns([1, 3, 2, 0.8, 0.8])
+                c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
+                
+                c2.write(f"**{row['full_name']}**")
+                c2.caption(f"Username: {row['username']}")
+                
+                # --- BUTANG UNLOCK MANUAL UNTUK ADMIN ---
+                if c3.button("🔓 Unlock Akses", key=f"unlock_{row['id']}", help="Buka semula butang Review/Edit", use_container_width=True):
+                    with engine.begin() as conn:
+                        conn.execute(text("UPDATE reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
+                    st.cache_resource.clear()
+                    st.toast(f"✅ Akses dibuka untuk {row['full_name']}!")
+                    time.sleep(0.5)
+                    st.rerun()
+                
+                if c4.button("✏️", key=f"er_{row['id']}", use_container_width=True): 
+                    edit_reviewer_dialog(row['id'], row['username'], row['full_name'], engine, hash_password)
+                
+                if c5.button("🗑️", key=f"dr_{row['id']}", use_container_width=True): 
+                    delete_item("reviewers", row['id'])
 
     elif menu == "User Management":
         st.header("🔑 System Admin Accounts")
