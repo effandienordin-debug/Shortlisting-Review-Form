@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import time
 from sqlalchemy import text
 
 # --- 1. CACHED DATA FETCHING ---
@@ -135,10 +136,32 @@ def render_review_form(engine, get_malaysia_time, render_evaluation_fields):
                                     st.session_state.active_review_app = row['name']
                                     st.rerun()
 
-            if not is_locked and len(reviews_lookup) >= len(apps) > 0:
+            # --- BAHAGIAN BAWAH GALLERY VIEW (BUTANG RESET & SUBMIT) ---
+            if not is_locked and len(reviews_lookup) > 0:
                 st.divider()
-                if st.button("🚀 FINAL SUBMIT ALL REVIEWS", type="primary", use_container_width=True):
-                    with engine.begin() as conn:
-                        conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
-                    st.cache_resource.clear()
-                    st.balloons(); st.rerun()
+                c_reset, c_submit = st.columns(2)
+                
+                # 1. BUTANG RESET Khas Untuk Penilai Ini Sahaja
+                with c_reset.expander("⚠️ Reset All My Drafts"):
+                    st.warning("Amaran: Ini akan memadam SEMUA markah dan draf ulasan anda yang belum di-submit.")
+                    if st.button("🗑️ Yes, Clear My Drafts", use_container_width=True):
+                        with engine.begin() as conn:
+                            # Padam rekod penilai ini sahaja
+                            conn.execute(text("DELETE FROM reviews WHERE reviewer_username = :u AND is_final = FALSE"), 
+                                         {"u": st.session_state.username})
+                        st.cache_resource.clear()
+                        st.toast("✅ Semua draf anda telah dibersihkan!")
+                        time.sleep(1)
+                        st.rerun()
+
+                # 2. BUTANG FINAL SUBMIT
+                with c_submit:
+                    if len(reviews_lookup) >= len(apps):
+                        if st.button("🚀 FINAL SUBMIT ALL REVIEWS", type="primary", use_container_width=True):
+                            with engine.begin() as conn:
+                                conn.execute(text("UPDATE reviews SET is_final = TRUE WHERE reviewer_username = :u"), {"u": st.session_state.username})
+                            st.cache_resource.clear()
+                            st.balloons()
+                            st.rerun()
+                    else:
+                        st.info("Sila lengkapkan semua penilaian sebelum hantar.")
