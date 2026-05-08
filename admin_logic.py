@@ -323,24 +323,26 @@ def render_management(menu, engine, hash_password, delete_item):
         st.subheader("1. Auto-Transfer from Phase 1")
         st.info("Sistem akan mencari pemohon yang mendapat sekurang-kurangnya DUA (2) undian 'YES' dari penilai di Fasa 1.")
         
-        if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
+       if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
             with engine.begin() as conn:
-                # Query untuk cari pemohon dengan >= 2 YES
+                # Guna UPPER() untuk elak masalah casing dan pastikan is_final ditanda
                 query = text("""
-                    SELECT applicant_name 
+                    SELECT applicant_name, COUNT(*) as yes_count 
                     FROM reviews 
-                    WHERE final_recommendation IN ('Yes', 'YES') AND is_final = TRUE
+                    WHERE UPPER(final_recommendation) = 'YES' 
+                    AND is_final = TRUE
                     GROUP BY applicant_name 
                     HAVING COUNT(*) >= 2
                 """)
                 qualified_apps = conn.execute(query).fetchall()
                 
-                count = 0
-                for q in qualified_apps:
-                    app_name = q[0]
-                    check = conn.execute(text("SELECT id FROM applicants WHERE name = :n"), {"n": app_name}).fetchone()
-                    if check:
-                        # Masukkan ke phase2_assignments (Sediakan semua penilai untuk nilai)
+                if not qualified_apps:
+                    st.warning("⚠️ Tiada pemohon yang memenuhi syarat (Min 2 YES & Status Final). Sila pastikan penilai sudah klik 'Final Submit'.")
+                else:
+                    count = 0
+                    for q in qualified_apps:
+                        app_name = q[0]
+                        # Masukkan ke phase2_assignments
                         conn.execute(text("""
                             INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
                             SELECT :a, username FROM reviewers 
@@ -348,11 +350,11 @@ def render_management(menu, engine, hash_password, delete_item):
                         """), {"a": app_name})
                         count += 1
                         
-            st.cache_resource.clear()
-            st.success(f"✅ {count} pemohon berkelayakan telah berjaya dibawa ke Fasa 2!")
-            time.sleep(1.5)
-            st.rerun()
-
+                    st.success(f"✅ {count} pemohon telah berjaya dibawa ke Fasa 2!")
+                    st.cache_resource.clear()
+                    time.sleep(1)
+                    st.rerun()
+                    
         st.divider()
 
         st.subheader("2. Manual Upload / Override")
