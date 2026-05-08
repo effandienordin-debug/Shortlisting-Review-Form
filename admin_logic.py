@@ -320,62 +320,125 @@ def render_management(menu, engine, hash_password, delete_item):
     elif menu == "Phase 2 Management":
         st.header("🏆 Phase 2: Winner Selection Management")
         
-        st.subheader("1. Auto-Transfer from Phase 1")
-        st.info("Sistem akan mencari pemohon yang mendapat sekurang-kurangnya DUA (2) undian 'YES' dari penilai di Fasa 1.")
+        # --- 1. LIVE TRACKING: CALON LAYAK DARI PHASE 1 ---
+        st.subheader("📋 Status Kelayakan (Min 2 YES dari Phase 1)")
         
-        if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
+        query_check = text("""
+            SELECT applicant_name, 
+                   COUNT(CASE WHEN UPPER(final_recommendation) IN ('YES', 'Y') THEN 1 END) as total_yes,
+                   COUNT(CASE WHEN is_final = TRUE THEN 1 END) as finalized_count
+            FROM reviews 
+            GROUP BY applicant_name
+        """)
+        
+        with engine.connect() as conn:
+            try:
+                eligibility_df = pd.read_sql(query_check, conn)
+                p2_assigned_df = pd.read_sql("SELECT DISTINCT applicant_name FROM phase2_assignments", conn)
+                p2_assigned = p2_assigned_df['applicant_name'].tolist() if not p2_assigned_df.empty else []
+            except Exception as e:
+                eligibility_df = pd.DataFrame()
+                p2_assigned = []
+
+        if eligibility_df.empty:
+            st.info("Tiada data penilaian dari Fasa 1 buat masa ini.")
+        else:
+            eligibility_df['Status'] = eligibility_df['applicant_name'].apply(
+                lambda x: "✅ Sudah di Phase 2" if x in p2_assigned else "⏳ Menunggu Filter"
+            )
+            
+            qualified_view = eligibility_df[eligibility_df['total_yes'] >= 1].sort_values(by='total_yes', ascending=False)
+            
+            if not qualified_view.empty:
+                st.dataframe(
+                    qualified_view, 
+                    column_config={
+                        "applicant_name": "Nama Pemohon",
+                        "total_yes": "Jumlah YES",
+                        "finalized_count": "Penilai Selesai (Final)",
+                        "Status": "Status Tindakan"
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+                st.caption("Nota: Hanya pemohon dengan **Min 2 YES** dan **Finalized** akan dipindahkan oleh butang automatik di bawah.")
+            else:
+                st.warning("Belum ada pemohon yang mendapat undian YES.")
+
+        st.divider()
+
+        # --- 2. AUTO-TRANSFER ---
+        st.subheader("🚀 Pindahkan Calon Layak")
+        col_btn1, col_btn2 = st.columns([2, 2])
+        
+        if col_btn1.button("Filter & Transfer Qualified Applicants", type="primary", use_container_width=True):
             with engine.begin() as conn:
                 query = text("""
-                    SELECT applicant_name, COUNT(*) as yes_count 
-                    FROM reviews 
-                    WHERE UPPER(final_recommendation) = 'YES' 
-                    AND is_final = TRUE
-                    GROUP BY applicant_name 
-                    HAVING COUNT(*) >= 2
+                    SELECT applicant_name FROM reviews 
+                    WHERE UPPER(final_recommendation) IN ('YES', 'Y') AND is_final = TRUE
+                    GROUP BY applicant_name HAVING COUNT(*) >= 2
                 """)
                 qualified_apps = conn.execute(query).fetchall()
                 
                 if not qualified_apps:
-                    st.warning("⚠️ Tiada pemohon yang memenuhi syarat (Min 2 YES & Status Final).")
+                    st.warning("Tiada calon baru yang memenuhi syarat Min 2 YES & Final Submit.")
                 else:
                     count = 0
                     for q in qualified_apps:
-                        app_name = q[0]
                         conn.execute(text("""
                             INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
-                            SELECT :a, username FROM reviewers 
-                            ON CONFLICT DO NOTHING
-                        """), {"a": app_name})
+                            SELECT :a, username FROM reviewers ON CONFLICT DO NOTHING
+                        """), {"a": q[0]})
                         count += 1
-                    st.success(f"✅ {count} pemohon berkelayakan telah dibawa ke Fasa 2!")
-                    st.cache_resource.clear()
-                    time.sleep(1.5)
-                    st.rerun()
+                    st.success(f"✅ {count} calon berjaya dipindahkan!")
+                    st.cache_resource.clear(); time.sleep(1); st.rerun()
 
         st.divider()
 
-        st.subheader("2. Manual Upload / Override")
-        st.write("Gunakan fungsi ini jika anda ingin memasukkan pemohon secara manual ke Fasa 2.")
+        # --- 3. MANUAL & RESET MANAGEMENT ---
+        st.subheader("⚙️ Pengurusan Senarai Phase 2")
         
-        all_apps = pd.read_sql("SELECT name FROM applicants ORDER BY name ASC", engine)['name'].tolist()
+        tab_manual, tab_remove = st.tabs(["➕ Tambah Manual", "🗑️ Padam / Reset"])
         
-        with st.form("manual_p2_add", clear_on_submit=True):
-            manual_apps = st.multiselect("Pilih Pemohon untuk dimasukkan ke Fasa 2:", options=all_apps)
-            if st.form_submit_button("➕ Tambah Manual ke Fasa 2"):
-                if manual_apps:
-                    with engine.begin() as conn:
-                        for app_name in manual_apps:
-                            conn.execute(text("""
-                                INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
-                                SELECT :a, username FROM reviewers 
-                                ON CONFLICT DO NOTHING
-                            """), {"a": app_name})
-                    st.cache_resource.clear()
-                    st.success("✅ Pemohon berjaya ditambahkan secara manual ke Fasa 2!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("🚨 Sila pilih sekurang-kurangnya satu pemohon.")
+        with tab_manual:
+            all_apps_df = pd.read_sql("SELECT name FROM applicants ORDER BY name ASC", engine)
+            all_apps = all_apps_df['name'].tolist() if not all_apps_df.empty else []
+            with st.form("manual_p2", clear_on_submit=True):
+                m_apps = st.multiselect("Pilih Pemohon:", options=all_apps)
+                if st.form_submit_button("Tambah ke Fasa 2"):
+                    if m_apps:
+                        with engine.begin() as conn:
+                            for a in m_apps:
+                                conn.execute(text("INSERT INTO phase2_assignments (applicant_name, reviewer_username) SELECT :a, username FROM reviewers ON CONFLICT DO NOTHING"), {"a": a})
+                        st.success("Berjaya ditambah!"); st.cache_resource.clear(); time.sleep(0.5); st.rerun()
+                    else:
+                        st.error("Sila pilih pemohon.")
+
+        with tab_remove:
+            try:
+                p2_current = pd.read_sql("SELECT DISTINCT applicant_name FROM phase2_assignments", engine)
+            except:
+                p2_current = pd.DataFrame()
+                
+            if not p2_current.empty:
+                for idx, row in p2_current.iterrows():
+                    c_name, c_btn = st.columns([4, 1])
+                    c_name.write(f"• {row['applicant_name']}")
+                    if c_btn.button("Remove", key=f"del_p2_{idx}"):
+                        with engine.begin() as conn:
+                            conn.execute(text("DELETE FROM phase2_assignments WHERE applicant_name = :n"), {"n": row['applicant_name']})
+                        st.cache_resource.clear(); st.rerun()
+                
+                st.write("")
+                with st.expander("⚠️ Master Reset Phase 2"):
+                    st.error("Ini akan memadam semua pemohon dari Fasa 2.")
+                    if st.checkbox("Sahkan"):
+                        if st.button("🗑️ KOSONGKAN FASA 2", type="primary"):
+                            with engine.begin() as conn:
+                                conn.execute(text("DELETE FROM phase2_assignments"))
+                            st.cache_resource.clear(); st.rerun()
+            else:
+                st.info("Senarai Fasa 2 kosong.")
 
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
