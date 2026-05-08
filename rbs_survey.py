@@ -5,11 +5,13 @@ import json
 import time
 from sqlalchemy import text
 from datetime import datetime, timedelta
+
 from database_utils import engine, init_db, check_password, hash_password, get_malaysia_time, delete_item
-from form_components import render_evaluation_fields
 from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form
 from reporting_logic import render_reporting
+
+# Pastikan kedua-dua form diimport di sini
 from form_components import render_evaluation_fields, render_scoring_fields
 
 # --- 1. INISIALISASI DATABASE ---
@@ -110,10 +112,13 @@ with st.sidebar:
 
     # Kawalan Navigasi yang Ketat
     if st.session_state.role == "Admin":
-        opts = ["Dashboard", "Reporting", "User Management", "Reviewer Management", "Applicant Management"]
+        # Ditambah Phase 2 Management untuk Admin
+        opts = ["Dashboard", "Reporting", "Applicant Management", "Phase 2 Management", "Reviewer Management", "User Management"]
         menu = st.radio("Navigation", opts)
     else:
-        menu = "Review Form" # Reviewer HANYA boleh nampak ini
+        # Ditambah pilihan Fasa 1 dan Fasa 2 untuk Reviewer
+        opts = ["Phase 1: Shortlisting", "Phase 2: Winner Selection"]
+        menu = st.radio("Navigation", opts)
 
     st.divider()
 
@@ -132,7 +137,12 @@ if menu == "Dashboard":
     render_dashboard(engine)
 elif menu == "Reporting": 
     render_reporting(engine)
-elif menu in ["User Management", "Reviewer Management", "Applicant Management"]:
+elif menu in ["User Management", "Reviewer Management", "Applicant Management", "Phase 2 Management"]:
+    # Semua pengurusan Admin di-route ke sini
     render_management(menu, engine, hash_password, delete_item)
-elif menu == "Review Form":
-    render_review_form(engine, get_malaysia_time, render_evaluation_fields)
+elif menu in ["Phase 1: Shortlisting", "Phase 2: Winner Selection"]:
+    # Kenalpasti sama ada penilai sedang menekan Fasa 1 atau Fasa 2
+    phase_num = 1 if "Phase 1" in menu else 2
+    
+    # Hantar 5 parameter yang diperlukan oleh fungsi baru (termasuk phase_num & render_scoring_fields)
+    render_review_form(engine, get_malaysia_time, phase_num, render_evaluation_fields, render_scoring_fields)
