@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 def get_radio_index(resp_dict, key, options=["Yes", "No"]):
     val = resp_dict.get(key)
@@ -67,27 +68,13 @@ def render_scoring_fields(prev_resp=None, prev_data=None, disabled=False):
 
     st.subheader("📊 Phase 2: Scoring (Winner Selection)")
     
-    # --- TAMBAHAN RUJUKAN KRITERIA DARI GAMBAR ---
-    with st.expander("📖 Rujukan Kriteria Penilaian (Scoring Rubric)", expanded=True):
-        st.markdown("""
-        **1. Research Quality and Feasibility (50%)**
-        * Hypothesis and objectives (10%)
-        * Methodology (10%)
-        * Track Record (10%)
-        * Achievable within the grant period (2 years) (10%)
-        * Potential risks have been identified, and there are plans to address them (10%)
-
-        **2. Impact (20%)**
-        * Addresses an important issue in medical science (10%)
-        * Potential to contribute to significant advancements in the medical field (10%)
-
-        **3. Innovation (20%)**
-        * Proposes a novel approach or methodology (20%)
-
-        **4. Value for Money (10%)**
-        * Requested funds are essential and appropriately allocated based on the importance of the research (10%)
-        """)
-    # ----------------------------------------------
+    # --- PAPARAN GAMBAR RUJUKAN DI SINI ---
+    image_path = "rubric.jpeg"
+    if os.path.exists(image_path):
+        st.image(image_path, use_container_width=True, caption="Rujukan Kriteria Penilaian")
+    else:
+        st.info("💡 Gambar rujukan kriteria ('rubric.jpeg') tidak dijumpai. Sila pastikan fail rubric.jpeg berada di dalam folder yang sama.")
+    # -------------------------------------
 
     st.caption("Sila berikan markah 1 (Paling Rendah) hingga 10 (Paling Tinggi) bagi setiap kriteria.")
 
