@@ -323,9 +323,8 @@ def render_management(menu, engine, hash_password, delete_item):
         st.subheader("1. Auto-Transfer from Phase 1")
         st.info("Sistem akan mencari pemohon yang mendapat sekurang-kurangnya DUA (2) undian 'YES' dari penilai di Fasa 1.")
         
-       if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
+        if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
             with engine.begin() as conn:
-                # Guna UPPER() untuk elak masalah casing dan pastikan is_final ditanda
                 query = text("""
                     SELECT applicant_name, COUNT(*) as yes_count 
                     FROM reviews 
@@ -337,28 +336,26 @@ def render_management(menu, engine, hash_password, delete_item):
                 qualified_apps = conn.execute(query).fetchall()
                 
                 if not qualified_apps:
-                    st.warning("⚠️ Tiada pemohon yang memenuhi syarat (Min 2 YES & Status Final). Sila pastikan penilai sudah klik 'Final Submit'.")
+                    st.warning("⚠️ Tiada pemohon yang memenuhi syarat (Min 2 YES & Status Final).")
                 else:
                     count = 0
                     for q in qualified_apps:
                         app_name = q[0]
-                        # Masukkan ke phase2_assignments
                         conn.execute(text("""
                             INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
                             SELECT :a, username FROM reviewers 
                             ON CONFLICT DO NOTHING
                         """), {"a": app_name})
                         count += 1
-                        
-                    st.success(f"✅ {count} pemohon telah berjaya dibawa ke Fasa 2!")
+                    st.success(f"✅ {count} pemohon berkelayakan telah dibawa ke Fasa 2!")
                     st.cache_resource.clear()
-                    time.sleep(1)
+                    time.sleep(1.5)
                     st.rerun()
-                    
+
         st.divider()
 
         st.subheader("2. Manual Upload / Override")
-        st.write("Gunakan fungsi ini jika proses automatik gagal atau jika anda ingin memasukkan pemohon secara manual ke Fasa 2.")
+        st.write("Gunakan fungsi ini jika anda ingin memasukkan pemohon secara manual ke Fasa 2.")
         
         all_apps = pd.read_sql("SELECT name FROM applicants ORDER BY name ASC", engine)['name'].tolist()
         
@@ -429,7 +426,10 @@ def render_management(menu, engine, hash_password, delete_item):
                 if c3.button("🔓 Unlock Akses P1 & P2", key=f"unlock_{row['id']}", help="Buka semula butang Review/Edit", use_container_width=True):
                     with engine.begin() as conn:
                         conn.execute(text("UPDATE reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
-                        conn.execute(text("UPDATE phase2_reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
+                        try:
+                            conn.execute(text("UPDATE phase2_reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
+                        except:
+                            pass
                     st.cache_resource.clear()
                     st.toast(f"✅ Akses dibuka untuk {row['full_name']}!")
                     time.sleep(0.5)
