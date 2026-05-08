@@ -317,6 +317,67 @@ def render_management(menu, engine, hash_password, delete_item):
                         conn.execute(text("DELETE FROM applicant_assignments WHERE applicant_name = :a"), {"a": app_name})
                     delete_item("applicants", row['id'])
 
+    elif menu == "Phase 2 Management":
+        st.header("🏆 Phase 2: Winner Selection Management")
+        
+        st.subheader("1. Auto-Transfer from Phase 1")
+        st.info("Sistem akan mencari pemohon yang mendapat sekurang-kurangnya DUA (2) undian 'YES' dari penilai di Fasa 1.")
+        
+        if st.button("🚀 Filter & Transfer Qualified Applicants", type="primary"):
+            with engine.begin() as conn:
+                # Query untuk cari pemohon dengan >= 2 YES
+                query = text("""
+                    SELECT applicant_name 
+                    FROM reviews 
+                    WHERE final_recommendation IN ('Yes', 'YES') AND is_final = TRUE
+                    GROUP BY applicant_name 
+                    HAVING COUNT(*) >= 2
+                """)
+                qualified_apps = conn.execute(query).fetchall()
+                
+                count = 0
+                for q in qualified_apps:
+                    app_name = q[0]
+                    check = conn.execute(text("SELECT id FROM applicants WHERE name = :n"), {"n": app_name}).fetchone()
+                    if check:
+                        # Masukkan ke phase2_assignments (Sediakan semua penilai untuk nilai)
+                        conn.execute(text("""
+                            INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
+                            SELECT :a, username FROM reviewers 
+                            ON CONFLICT DO NOTHING
+                        """), {"a": app_name})
+                        count += 1
+                        
+            st.cache_resource.clear()
+            st.success(f"✅ {count} pemohon berkelayakan telah berjaya dibawa ke Fasa 2!")
+            time.sleep(1.5)
+            st.rerun()
+
+        st.divider()
+
+        st.subheader("2. Manual Upload / Override")
+        st.write("Gunakan fungsi ini jika proses automatik gagal atau jika anda ingin memasukkan pemohon secara manual ke Fasa 2.")
+        
+        all_apps = pd.read_sql("SELECT name FROM applicants ORDER BY name ASC", engine)['name'].tolist()
+        
+        with st.form("manual_p2_add", clear_on_submit=True):
+            manual_apps = st.multiselect("Pilih Pemohon untuk dimasukkan ke Fasa 2:", options=all_apps)
+            if st.form_submit_button("➕ Tambah Manual ke Fasa 2"):
+                if manual_apps:
+                    with engine.begin() as conn:
+                        for app_name in manual_apps:
+                            conn.execute(text("""
+                                INSERT INTO phase2_assignments (applicant_name, reviewer_username) 
+                                SELECT :a, username FROM reviewers 
+                                ON CONFLICT DO NOTHING
+                            """), {"a": app_name})
+                    st.cache_resource.clear()
+                    st.success("✅ Pemohon berjaya ditambahkan secara manual ke Fasa 2!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("🚨 Sila pilih sekurang-kurangnya satu pemohon.")
+
     elif menu == "Reviewer Management":
         st.header("👤 Evaluators & Access Links")
         
@@ -357,17 +418,16 @@ def render_management(menu, engine, hash_password, delete_item):
         df = pd.read_sql("SELECT id, username, full_name FROM reviewers ORDER BY id ASC", engine)
         for idx, row in df.iterrows():
             with st.container(border=True):
-                # Kolum diubahsuai untuk memberi ruang kepada butang Unlock
                 c1, c2, c3, c4, c5 = st.columns([1, 3, 2, 0.8, 0.8])
                 c1.markdown(f"<img src='{get_local_image_base64(row['username'])}' width='40' style='border-radius:50%;'>", unsafe_allow_html=True)
                 
                 c2.write(f"**{row['full_name']}**")
                 c2.caption(f"Username: {row['username']}")
                 
-                # --- BUTANG UNLOCK MANUAL UNTUK ADMIN ---
-                if c3.button("🔓 Unlock Akses", key=f"unlock_{row['id']}", help="Buka semula butang Review/Edit", use_container_width=True):
+                if c3.button("🔓 Unlock Akses P1 & P2", key=f"unlock_{row['id']}", help="Buka semula butang Review/Edit", use_container_width=True):
                     with engine.begin() as conn:
                         conn.execute(text("UPDATE reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
+                        conn.execute(text("UPDATE phase2_reviews SET is_final = FALSE WHERE reviewer_username = :u"), {"u": row['username']})
                     st.cache_resource.clear()
                     st.toast(f"✅ Akses dibuka untuk {row['full_name']}!")
                     time.sleep(0.5)
