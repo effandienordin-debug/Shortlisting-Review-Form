@@ -66,31 +66,50 @@ def render_scoring_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_data is None: prev_data = {}
 
     st.subheader("📊 Phase 2: Scoring (Winner Selection)")
+    
+    # --- TAMBAHAN RUJUKAN KRITERIA DARI GAMBAR ---
+    with st.expander("📖 Rujukan Kriteria Penilaian (Scoring Rubric)", expanded=True):
+        st.markdown("""
+        **1. Research Quality and Feasibility (50%)**
+        * Hypothesis and objectives (10%)
+        * Methodology (10%)
+        * Track Record (10%)
+        * Achievable within the grant period (2 years) (10%)
+        * Potential risks have been identified, and there are plans to address them (10%)
+
+        **2. Impact (20%)**
+        * Addresses an important issue in medical science (10%)
+        * Potential to contribute to significant advancements in the medical field (10%)
+
+        **3. Innovation (20%)**
+        * Proposes a novel approach or methodology (20%)
+
+        **4. Value for Money (10%)**
+        * Requested funds are essential and appropriately allocated based on the importance of the research (10%)
+        """)
+    # ----------------------------------------------
+
     st.caption("Sila berikan markah 1 (Paling Rendah) hingga 10 (Paling Tinggi) bagi setiap kriteria.")
 
     res = {"responses": {}}
     
     # Kriteria 1
     st.markdown("**1. Research Quality and Feasibility (50%)**")
-    st.caption("Includes: Hypothesis & Objectives (10%), Methodology (10%), Track Record (10%), Achievable within 2 Years (10%), Risk Management (10%).")
     res["responses"]["q1"] = st.number_input("Score (1-10) *", min_value=1, max_value=10, value=int(prev_resp.get("q1", 1)), step=1, disabled=disabled, key="p2q1")
     st.divider()
 
     # Kriteria 2
     st.markdown("**2. Impact (20%)**")
-    st.caption("Addresses an important issue in medical science and potential to contribute to significant advancements.")
     res["responses"]["q2"] = st.number_input("Score (1-10) *", min_value=1, max_value=10, value=int(prev_resp.get("q2", 1)), step=1, disabled=disabled, key="p2q2")
     st.divider()
 
     # Kriteria 3
     st.markdown("**3. Innovation (20%)**")
-    st.caption("Proposes a novel approach or methodology.")
     res["responses"]["q3"] = st.number_input("Score (1-10) *", min_value=1, max_value=10, value=int(prev_resp.get("q3", 1)), step=1, disabled=disabled, key="p2q3")
     st.divider()
 
     # Kriteria 4
     st.markdown("**4. Value for Money (10%)**")
-    st.caption("Requested funds are essential and appropriately allocated based on the importance of the research.")
     res["responses"]["q4"] = st.number_input("Score (1-10) *", min_value=1, max_value=10, value=int(prev_resp.get("q4", 1)), step=1, disabled=disabled, key="p2q4")
 
     # Pengiraan Total (Darab dengan pemberat / weightage)
