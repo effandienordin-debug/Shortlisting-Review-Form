@@ -9,7 +9,8 @@ from database_utils import engine, init_db, check_password, hash_password, get_m
 from form_components import render_evaluation_fields
 from admin_logic import render_dashboard, render_management
 from reviewer_logic import render_review_form
-from reporting_logic import render_reporting 
+from reporting_logic import render_reporting
+from form_components import render_evaluation_fields, render_scoring_fields
 
 # --- 1. INISIALISASI DATABASE ---
 init_db()
