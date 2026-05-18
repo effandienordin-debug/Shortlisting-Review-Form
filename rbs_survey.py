@@ -106,7 +106,7 @@ with st.sidebar:
         opts = ["Dashboard", "Reporting", "Applicant Management", "Phase 2 Management", "Reviewer Management", "User Management"]
         menu = st.radio("Navigation", opts)
     else:
-        opts = ["Phase 1: Shortlisting", "Phase 2: Winner Selection"]
+        opts = ["Phase 1: Shortlisting", "Phase 2: Evaluation"]
         menu = st.radio("Navigation", opts)
 
     st.divider()
@@ -124,6 +124,6 @@ elif menu == "Reporting":
     render_reporting(engine)
 elif menu in ["User Management", "Reviewer Management", "Applicant Management", "Phase 2 Management"]:
     render_management(menu, engine, hash_password, delete_item)
-elif menu in ["Phase 1: Shortlisting", "Phase 2: Winner Selection"]:
+elif menu in ["Phase 1: Shortlisting", "Phase 2: Evaluation"]:
     phase_num = 1 if "Phase 1" in menu else 2
     render_review_form(engine, get_malaysia_time, phase_num, render_evaluation_fields, render_scoring_fields)
