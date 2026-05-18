@@ -318,7 +318,7 @@ def render_management(menu, engine, hash_password, delete_item):
                     delete_item("applicants", row['id'])
 
     elif menu == "Phase 2 Management":
-        st.header("🏆 Phase 2: Winner Selection Management")
+        st.header("🏆 Phase 2: Evaluation Selection Management")
         
         # --- 1. LIVE TRACKING: CALON LAYAK DARI PHASE 1 ---
         st.subheader("📋 Status Kelayakan (Min 2 YES dari Phase 1)")
