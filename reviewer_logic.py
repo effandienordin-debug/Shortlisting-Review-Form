@@ -20,7 +20,7 @@ def get_assigned_applicants(_engine, username, phase):
 # --- 2. RENDER REVIEW FORM & GALLERY ---
 def render_review_form(engine, get_malaysia_time, phase, render_evaluation_fields, render_scoring_fields):
     table_reviews = "reviews" if phase == 1 else "phase2_reviews"
-    phase_name = "Phase 1: Shortlisting" if phase == 1 else "Phase 2: Winner Selection"
+    phase_name = "Phase 1: Shortlisting" if phase == 1 else "Phase 2: Evaluation"
 
     st.markdown(f"## 📋 Dr Ranjeet Bhagwan Singh Grant: {phase_name}")
     st.info("""
