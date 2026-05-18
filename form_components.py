@@ -66,7 +66,7 @@ def render_scoring_fields(prev_resp=None, prev_data=None, disabled=False):
     if prev_resp is None: prev_resp = {}
     if prev_data is None: prev_data = {}
 
-    st.subheader("📊 Phase 2: Scoring (Winner Selection)")
+    st.subheader("📊 Phase 2: Scoring (Evaluation)")
     
     # --- PAPARAN GAMBAR RUJUKAN DI SINI ---
     image_path = "rubric.jpeg"
